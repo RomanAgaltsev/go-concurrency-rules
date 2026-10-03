@@ -12,16 +12,16 @@
     {
       "description": "golangci-lint version inside golangci-lint-action's with: block, which the github-actions manager does not read.",
       "customType": "regex",
-      "managerFilePatterns": ["/^\.github/workflows/.+\.ya?ml$/"],
-      "matchStrings": ["golangci-lint-action@v\d+[\s\S]*?version:\s+(?<currentValue>v\d+\.\d+\.\d+)"],
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["golangci-lint-action@v\\d+[\\s\\S]*?version:\\s+(?<currentValue>v\\d+\\.\\d+\\.\\d+)"],
       "depNameTemplate": "golangci/golangci-lint",
       "datasourceTemplate": "github-releases"
     },
     {
       "description": "The Go version in setup-go. A new Go release triggers the floor-bump ritual (spec §11), so this PR is a work item, not housekeeping.",
       "customType": "regex",
-      "managerFilePatterns": ["/^\.github/workflows/.+\.ya?ml$/"],
-      "matchStrings": ["go-version:\s*'(?<currentValue>\d+\.\d+)'"],
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["go-version:\\s*'(?<currentValue>\\d+\\.\\d+)'"],
       "depNameTemplate": "golang",
       "datasourceTemplate": "golang-version",
       "versioningTemplate": "npm"
