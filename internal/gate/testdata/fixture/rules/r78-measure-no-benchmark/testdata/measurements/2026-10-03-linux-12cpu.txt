@@ -1,0 +1,33 @@
+# rule: R78
+# date: 2026-10-03
+# go: go1.27.1
+# os: linux/amd64
+# cpu: AMD Ryzen 5 3600 6-Core Processor
+# gomaxprocs: 1,4
+# command: go test -run '^$' -bench '.' -benchmem -count 10 -cpu 1,4 [-tags broken] ./rules/r84-measure-valid; benchstat broken.txt fixed.txt
+
+goos: linux
+goarch: amd64
+pkg: fixture/rules/r84-measure-valid
+cpu: AMD Ryzen 5 3600 6-Core Processor              
+        │   broken.txt   │              fixed.txt              │
+        │     sec/op     │   sec/op     vs base                │
+Sum       24706.00n ± 4%   39.23n ± 2%  -99.84% (p=0.000 n=10)
+Sum-4     38643.50n ± 2%   38.69n ± 4%  -99.90% (p=0.000 n=10)
+geomean      30.90µ        38.95n       -99.87%
+
+        │  broken.txt  │                 fixed.txt                 │
+        │     B/op     │     B/op      vs base                     │
+Sum       5.500Ki ± 0%   0.000Ki ± 0%  -100.00% (p=0.000 n=10)
+Sum-4     5.500Ki ± 0%   0.000Ki ± 0%  -100.00% (p=0.000 n=10)
+geomean   5.500Ki                      ?                       ¹ ²
+¹ summaries must be >0 to compute geomean
+² ratios must be >0 to compute geomean
+
+        │ broken.txt │               fixed.txt                │
+        │ allocs/op  │ allocs/op  vs base                     │
+Sum       202.0 ± 0%    0.0 ± 0%  -100.00% (p=0.000 n=10)
+Sum-4     202.0 ± 0%    0.0 ± 0%  -100.00% (p=0.000 n=10)
+geomean   202.0                   ?                       ¹ ²
+¹ summaries must be >0 to compute geomean
+² ratios must be >0 to compute geomean

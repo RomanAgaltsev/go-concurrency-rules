@@ -40,6 +40,13 @@ tasks:
       # SIGINT docker forwards, so Ctrl-C would never reach the gate.
       - "{{.DOCKER_RUN}} sh -c 'go build -o /tmp/gate ./internal/cmd/gate && exec /tmp/gate check {{.CLI_ARGS}}'"
 
+  measure:
+    desc: Record a measure rule's numbers, e.g. task measure -- rules/r01-start-sequential 1,4,12
+    cmds:
+      # In the container, like the gate: one machine description for every
+      # artifact this host produces. Run it on an otherwise idle machine.
+      - "{{.DOCKER_RUN}} sh scripts/measure.sh {{.CLI_ARGS}}"
+
   ci:
     desc: What CI runs, from this machine
     cmds:
