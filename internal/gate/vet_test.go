@@ -5,6 +5,20 @@ import (
 	"testing"
 )
 
+func TestPosnFile(t *testing.T) {
+	for in, want := range map[string]string{
+		"/src/rules/r12-x/broken.go:25:9":           "broken.go",
+		`C:\Users\a\rules\r12-x\broken.go:25:9`:     "broken.go",
+		"rules/r12-x/extra.go:9:19":                 "extra.go",
+		"broken.go:1:1":                             "broken.go",
+		`E:\GIT\go-concurrency-rules\fixed.go:24:9`: "fixed.go",
+	} {
+		if got := posnFile(in); got != want {
+			t.Errorf("posnFile(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestParseVetJSON(t *testing.T) {
 	tests := []struct {
 		name    string

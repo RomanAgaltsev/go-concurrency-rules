@@ -9,6 +9,7 @@ import (
 	"io"
 	"maps"
 	"os/exec"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -51,7 +52,31 @@ func (p Prover) proveVet(ctx context.Context, r Rule) ([]Violation, string) {
 		}
 		return bad("go vet -tags broken reported no %s diagnostic (it reported: %s)", an, found), ""
 	}
-	return nil, fmt.Sprintf("vet: fixed is clean; broken trips %s (%d diagnostic(s))", an, len(broken[an]))
+	// The diagnostic must come from broken.go. Any file built only with
+	// -tags broken would otherwise do, even with broken.go identical to fixed.go.
+	inBroken := 0
+	var elsewhere []string
+	for _, d := range broken[an] {
+		if f := posnFile(d.Posn); f == "broken.go" {
+			inBroken++
+		} else if !slices.Contains(elsewhere, f) {
+			elsewhere = append(elsewhere, f)
+		}
+	}
+	if inBroken == 0 {
+		return bad("go vet -tags broken reported %s only outside broken.go (%s)", an, strings.Join(elsewhere, ", ")), ""
+	}
+	return nil, fmt.Sprintf("vet: fixed is clean; broken.go trips %s (%d diagnostic(s))", an, inBroken)
+}
+
+// posnRe matches the line:column suffix of a vet position. The path before it
+// may itself contain a colon (C:\… on Windows), so only the suffix is cut.
+var posnRe = regexp.MustCompile(`:\d+:\d+$`)
+
+// posnFile returns the base name of the file a vet position points into.
+func posnFile(posn string) string {
+	p := posnRe.ReplaceAllString(posn, "")
+	return p[strings.LastIndexAny(p, `/\`)+1:]
 }
 
 // vet runs `go vet -json` and returns diagnostics by analyzer. A non-zero

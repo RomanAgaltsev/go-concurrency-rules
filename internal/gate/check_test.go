@@ -69,6 +69,9 @@ func TestCheckFixture(t *testing.T) {
 		{id: "R81", want: []string{"G1: go vet -tags broken reported no printf diagnostic (it reported: copylocks)"}},
 		{id: "R82", want: []string{"G1: fixed variant has go vet diagnostics: copylocks"}},
 		{id: "R83", want: []string{"G1: broken variant does not build"}},
+		// The diagnostic must come from broken.go: another broken-only file
+		// tripping the analyzer says nothing about the rule's broken variant.
+		{id: "R76", want: []string{"G1: go vet -tags broken reported copylocks only outside broken.go (extra.go)"}},
 		// measure: correct both ways, benchmarks that run, and a measurement
 		// artifact whose regime and sample counts are on record.
 		{id: "R84"},
