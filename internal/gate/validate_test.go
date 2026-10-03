@@ -67,8 +67,16 @@ func TestValidate(t *testing.T) {
 		{name: "unknown status", mutate: func(_ *testing.T, _ string, r *Rule) { r.Status = "draft" }, want: `status "draft"`},
 		{name: "active with retired_in", mutate: func(_ *testing.T, _ string, r *Rule) { r.RetiredIn = "go1.23" }, want: "has no retired_in"},
 		{name: "retired without replaced_by", mutate: func(_ *testing.T, _ string, r *Rule) {
-			r.Status, r.RetiredIn = "retired", "go1.23"
+			r.Status, r.RetiredIn, r.Page = "retired", "go1.23", "docs/retired/r07-race.md"
 		}, want: "replaced_by"},
+		// A page's directory and its status say the same thing twice; when
+		// they disagree, the site would file the rule under the wrong heading.
+		{name: "retired entry filed under docs/rules", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Status, r.RetiredIn, r.ReplacedBy = "retired", "go1.23", "R11"
+		}, want: "a retired entry's page lives in docs/retired/"},
+		{name: "active rule filed under docs/retired", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Page = "docs/retired/r07-race.md"
+		}, want: "an active rule's page lives in docs/rules/"},
 		{name: "unknown proof kind", mutate: func(_ *testing.T, _ string, r *Rule) { r.Proof.Kind = "vibes" }, want: `proof.kind "vibes"`},
 		{name: "bad test name", mutate: func(_ *testing.T, _ string, r *Rule) { r.Proof.Test = "concurrentInc" }, want: "not a test function name"},
 		{name: "no signature", mutate: func(_ *testing.T, _ string, r *Rule) { r.Proof.Signature = nil }, want: "proof.signature is empty"},
@@ -99,7 +107,37 @@ func TestValidate(t *testing.T) {
 			r.Proof.Signature = []string{"--- FAIL: TestConcurrentInc", "WARNING: DATA RACE"}
 		}},
 		{name: "too few runs", mutate: func(_ *testing.T, _ string, r *Rule) { r.Proof.Runs = 3 }, want: "proof.runs is 3"},
-		{name: "field of another kind", mutate: func(_ *testing.T, _ string, r *Rule) { r.Proof.Analyzer = "copylocks" }, want: "do not apply to kind race"},
+		{name: "field of another kind", mutate: func(_ *testing.T, _ string, r *Rule) { r.Proof.Analyzer = "copylocks" }, want: "proof.analyzer does not apply to kind race"},
+		// vet: the analyzer is the whole declaration.
+		{name: "vet", mutate: func(_ *testing.T, _ string, r *Rule) { r.Proof = Proof{Kind: "vet", Analyzer: "copylocks"} }},
+		{name: "vet without analyzer", mutate: func(_ *testing.T, _ string, r *Rule) { r.Proof = Proof{Kind: "vet"} }, want: `proof.analyzer "" is not`},
+		{name: "vet with a test", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof = Proof{Kind: "vet", Analyzer: "copylocks", Test: "TestConcurrentInc"}
+		}, want: "proof.test does not apply to kind vet"},
+		// measure: a correctness test run N times; no failure signature.
+		{name: "measure", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof = Proof{Kind: "measure", Test: "TestConcurrentInc", Runs: 20}
+		}},
+		{name: "measure with a signature", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof = Proof{Kind: "measure", Test: "TestConcurrentInc", Runs: 20, Signature: []string{"slow"}}
+		}, want: "proof.signature does not apply to kind measure"},
+		{name: "measure with too few runs", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof = Proof{Kind: "measure", Test: "TestConcurrentInc", Runs: 1}
+		}, want: "proof.runs is 1"},
+		// none: a retired entry that cannot carry a proof says why.
+		{name: "none", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.ID, r.Slug, r.Page, r.Dir = "X02", "x02-gone", "docs/retired/x02-gone.md", "retired/x02-gone"
+			r.Status, r.RetiredIn, r.ReplacedBy = "retired", "go1.23", "nothing"
+			r.Proof = Proof{Kind: "none", Reason: "selected per module, not per file"}
+		}},
+		{name: "none without a reason", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.ID, r.Slug, r.Page, r.Dir = "X02", "x02-gone", "docs/retired/x02-gone.md", "retired/x02-gone"
+			r.Status, r.RetiredIn, r.ReplacedBy = "retired", "go1.23", "nothing"
+			r.Proof = Proof{Kind: "none"}
+		}, want: "proof.reason is empty"},
+		{name: "none on an active rule", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof = Proof{Kind: "none", Reason: "too hard"}
+		}, want: "kind none is only for retired entries"},
 		{name: "dangling alternative", mutate: func(_ *testing.T, _ string, r *Rule) { r.Alternatives = []string{"R99"} }, want: "alternative R99 does not exist"},
 		{name: "self alternative", mutate: func(_ *testing.T, _ string, r *Rule) { r.Alternatives = []string{"R07"} }, want: "lists the rule itself"},
 		{name: "no sources", mutate: func(_ *testing.T, _ string, r *Rule) { r.Sources = nil }, want: "sources is empty"},

@@ -38,6 +38,14 @@ func (p Prover) Prove(ctx context.Context, r Rule) ([]Violation, string) {
 	switch r.Proof.Kind {
 	case "race", "test":
 		return p.proveTest(ctx, r)
+	case "vet":
+		return p.proveVet(ctx, r)
+	case "measure":
+		return p.proveMeasure(ctx, r)
+	case "none":
+		// Nothing to run, and the summary says so: an entry admitted without
+		// a proof must not read like one admitted with one.
+		return nil, "none: no proof — " + r.Proof.Reason
 	default:
 		return []Violation{{Rule: r.ID, Gate: "G1", Msg: fmt.Sprintf("proof kind %q has no prover", r.Proof.Kind)}}, ""
 	}
@@ -57,21 +65,11 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 	}
 	pr := r.Proof
 	pkg := "./" + r.Dir
-	run := "^" + regexp.QuoteMeta(pr.Test) + "$"
 	timeout := p.timeout()
 
-	// The fixed variant: N passes in one process. -v so the passes can be
-	// counted — a -run pattern that matches nothing also exits 0. One process
-	// timeout covers all N: a fixed variant that hangs must be stopped in
-	// minutes, with its reason, not after N times as long.
-	out, err := p.goCmd(ctx, timeout, "test", "-race", "-shuffle=on", "-v",
-		fmt.Sprintf("-count=%d", pr.Runs), "-timeout", timeout.String(), "-run", run, pkg)
-	if err != nil {
-		return bad("fixed variant does not pass %s:\n%s", pr.Test, excerpt(out)), ""
-	}
-	passRe := regexp.MustCompile(`(?m)^--- PASS: ` + regexp.QuoteMeta(pr.Test) + ` \(`)
-	if got := len(passRe.FindAll(out, -1)); got != pr.Runs {
-		return bad("fixed variant: %s passed %d times, want %d — does the test exist?", pr.Test, got, pr.Runs), ""
+	out, vs := p.passes(ctx, r, "fixed", pr.Runs)
+	if vs != nil {
+		return vs, ""
 	}
 	// A signature the fixed run prints as well cannot tell broken from fixed.
 	for _, s := range pr.Signature {
@@ -133,6 +131,35 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 	}
 	return nil, fmt.Sprintf("%s: fixed passed %d×; broken failed %d/%d separate runs with the signature",
 		pr.Kind, pr.Runs, withSig, pr.Runs)
+}
+
+// passes runs the proof test of one variant n times in one process, under
+// -race, and requires n passes. -v so the passes can be counted — a -run
+// pattern that matches nothing also exits 0. One process timeout covers all n:
+// a variant that hangs must be stopped in minutes, with its reason, not after
+// n times as long.
+func (p Prover) passes(ctx context.Context, r Rule, variant string, n int) ([]byte, []Violation) {
+	bad := func(format string, args ...any) []Violation {
+		return []Violation{{Rule: r.ID, Gate: "G1", Msg: fmt.Sprintf(format, args...)}}
+	}
+	test := r.Proof.Test
+	timeout := p.timeout()
+	args := []string{
+		"test", "-race", "-shuffle=on", "-v", fmt.Sprintf("-count=%d", n),
+		"-timeout", timeout.String(), "-run", "^" + regexp.QuoteMeta(test) + "$",
+	}
+	if variant == "broken" {
+		args = append(args, "-tags", "broken")
+	}
+	out, err := p.goCmd(ctx, timeout, append(args, "./"+r.Dir)...)
+	if err != nil {
+		return out, bad("%s variant does not pass %s:\n%s", variant, test, excerpt(out))
+	}
+	passRe := regexp.MustCompile(`(?m)^--- PASS: ` + regexp.QuoteMeta(test) + ` \(`)
+	if got := len(passRe.FindAll(out, -1)); got != n {
+		return out, bad("%s variant: %s passed %d times, want %d — does the test exist?", variant, test, got, n)
+	}
+	return out, nil
 }
 
 type runResult struct {
@@ -199,14 +226,17 @@ func (p Prover) runOnce(ctx context.Context, bin string, r Rule) runResult {
 func (p Prover) goCmd(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout+time.Minute) // + build time
 	defer cancel()
-	goBin := p.Go
-	if goBin == "" {
-		goBin = "go"
-	}
 	//nolint:gosec // G204: the go command with arguments built from validated front matter
-	cmd := exec.CommandContext(ctx, goBin, args...)
+	cmd := exec.CommandContext(ctx, p.goBin(), args...)
 	cmd.Dir = p.Root
 	return cmd.CombinedOutput()
+}
+
+func (p Prover) goBin() string {
+	if p.Go == "" {
+		return "go"
+	}
+	return p.Go
 }
 
 func (p Prover) jobs() int {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/build/constraint"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,11 +21,11 @@ const MinRuns = 10
 var (
 	groups = []string{"ownership", "shared-memory", "coordination", "time", "testing", "measurement"}
 	tags   = []string{"read", "write", "refactor", "test", "profile"}
-	kinds  = []string{"race", "test"}
 
-	idRe      = regexp.MustCompile(`^[RX]\d{2}$`)
-	versionRe = regexp.MustCompile(`^go1\.\d+$`)
-	testRe    = regexp.MustCompile(`^Test[A-Z_0-9]\w*$`)
+	idRe       = regexp.MustCompile(`^[RX]\d{2}$`)
+	versionRe  = regexp.MustCompile(`^go1\.\d+$`)
+	testRe     = regexp.MustCompile(`^Test[A-Z_0-9]\w*$`)
+	analyzerRe = regexp.MustCompile(`^[a-z][a-z0-9]*$`)
 )
 
 // Validate checks every rule's front matter and the shape of its code
@@ -81,6 +82,9 @@ func validateRule(root string, r Rule, known map[string]int) []Violation {
 	}
 	validateStatus(r, bad)
 	validateProof(r.Proof, bad)
+	if r.Proof.Kind == "none" && r.Status != "retired" {
+		bad("kind none is only for retired entries: an active rule must prove itself")
+	}
 	for _, alt := range r.Alternatives {
 		switch {
 		case alt == r.ID:
@@ -97,7 +101,9 @@ func validateRule(root string, r Rule, known map[string]int) []Violation {
 			bad("source %q is not an https URL", s)
 		}
 	}
-	validateTwin(root, r, bad)
+	if r.Proof.Kind != "none" { // an entry without a proof has no twin to check
+		validateTwin(root, r, bad)
+	}
 	return vs
 }
 
@@ -118,6 +124,7 @@ func validateTags(ts []string, bad func(string, ...any)) {
 }
 
 func validateStatus(r Rule, bad func(string, ...any)) {
+	inRetired := strings.HasPrefix(r.Page, "docs/retired/")
 	switch r.Status {
 	case "active":
 		if strings.HasPrefix(r.ID, "X") {
@@ -126,7 +133,13 @@ func validateStatus(r Rule, bad func(string, ...any)) {
 		if r.RetiredIn != "" || r.ReplacedBy != "" {
 			bad("an active rule has no retired_in or replaced_by")
 		}
+		if inRetired {
+			bad("an active rule's page lives in docs/rules/, not %s", r.Page)
+		}
 	case "retired":
+		if !inRetired {
+			bad("a retired entry's page lives in docs/retired/, not %s", r.Page)
+		}
 		if !versionRe.MatchString(r.RetiredIn) {
 			bad("retired_in %q is not a go1.N version", r.RetiredIn)
 		}
@@ -139,13 +152,69 @@ func validateStatus(r Rule, bad func(string, ...any)) {
 }
 
 func validateProof(p Proof, bad func(string, ...any)) {
-	if !slices.Contains(kinds, p.Kind) {
-		bad("proof.kind %q is not one of %s", p.Kind, strings.Join(kinds, ", "))
+	takes, ok := kindFields[p.Kind]
+	if !ok {
+		bad("proof.kind %q is not one of %s", p.Kind, strings.Join(slices.Sorted(maps.Keys(kindFields)), ", "))
 		return
 	}
-	if !testRe.MatchString(p.Test) {
-		bad("proof.test %q is not a test function name", p.Test)
+	// A field another kind uses is a sign the page declares a different proof
+	// than its author meant — refuse it rather than ignore it.
+	for _, f := range []struct {
+		name string
+		set  bool
+	}{
+		{"test", p.Test != ""},
+		{"signature", len(p.Signature) > 0},
+		{"analyzer", p.Analyzer != ""},
+		{"runs", p.Runs != 0},
+		{"reason", p.Reason != ""},
+	} {
+		if f.set && !slices.Contains(takes, f.name) {
+			bad("proof.%s does not apply to kind %s", f.name, p.Kind)
+		}
 	}
+	switch p.Kind {
+	case "race", "test":
+		validateTestProof(p, bad)
+	case "vet":
+		if !analyzerRe.MatchString(p.Analyzer) {
+			bad("proof.analyzer %q is not a go vet analyzer name (see `go tool vet help`)", p.Analyzer)
+		}
+	case "measure":
+		validateTestName(p.Test, bad)
+		validateRuns(p.Runs, bad)
+	case "none":
+		if strings.TrimSpace(p.Reason) == "" {
+			bad("proof.reason is empty: an entry without a proof says why it cannot carry one")
+		}
+	}
+}
+
+// kindFields lists, per proof kind, the proof fields it uses.
+var kindFields = map[string][]string{
+	"race":    {"test", "signature", "runs"},
+	"test":    {"test", "signature", "runs"},
+	"vet":     {"analyzer"},
+	"measure": {"test", "runs"},
+	"none":    {"reason"},
+}
+
+func validateTestName(test string, bad func(string, ...any)) {
+	if !testRe.MatchString(test) {
+		bad("proof.test %q is not a test function name", test)
+	}
+}
+
+func validateRuns(runs int, bad func(string, ...any)) {
+	if runs < MinRuns {
+		bad("proof.runs is %d; at least %d are required", runs, MinRuns)
+	}
+}
+
+// validateTestProof checks a race or test proof: what to run, what its
+// failure must print, and how many separate processes must print it.
+func validateTestProof(p Proof, bad func(string, ...any)) {
+	validateTestName(p.Test, bad)
 	if len(p.Signature) == 0 {
 		bad("proof.signature is empty: the gate must know what the broken variant's failure prints")
 	}
@@ -164,12 +233,7 @@ func validateProof(p Proof, bad func(string, ...any)) {
 	if p.Kind == "race" && len(p.Signature) > 0 && !slices.ContainsFunc(p.Signature, func(s string) bool { return strings.Contains(s, raceWarning) }) {
 		bad("kind race must list %q in proof.signature: the detector, not an assertion, is a race proof", raceWarning)
 	}
-	if p.Runs < MinRuns {
-		bad("proof.runs is %d; at least %d separate processes are required", p.Runs, MinRuns)
-	}
-	if p.Analyzer != "" || p.Reason != "" {
-		bad("proof.analyzer and proof.reason do not apply to kind %s", p.Kind)
-	}
+	validateRuns(p.Runs, bad)
 }
 
 // raceWarning is what the race detector prints for every race it reports.

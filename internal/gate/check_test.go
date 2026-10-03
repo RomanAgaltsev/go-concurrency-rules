@@ -64,6 +64,25 @@ func TestCheckFixture(t *testing.T) {
 		{id: "R88", want: []string{`G1: signature "checking the answer" also appears in the fixed variant's output`}},
 		// A fixed variant that hangs is stopped by one process timeout, not N.
 		{id: "R87", want: []string{"G1: fixed variant does not pass TestAnswer"}},
+		// vet: judged on go vet -json, never on its exit code (spec §15 P6).
+		{id: "R80"},
+		{id: "R81", want: []string{"G1: go vet -tags broken reported no printf diagnostic (it reported: copylocks)"}},
+		{id: "R82", want: []string{"G1: fixed variant has go vet diagnostics: copylocks"}},
+		{id: "R83", want: []string{"G1: broken variant does not build"}},
+		// The diagnostic must come from broken.go: another broken-only file
+		// tripping the analyzer says nothing about the rule's broken variant.
+		{id: "R76", want: []string{"G1: go vet -tags broken reported copylocks only outside broken.go (extra.go)"}},
+		// measure: correct both ways, benchmarks that run, and a measurement
+		// artifact whose regime and sample counts are on record.
+		{id: "R84"},
+		{id: "R85", want: []string{"G1: no measurement artifact"}},
+		{id: "R86", want: []string{`G1: measurement 2026-10-03-linux-12cpu.txt: header lacks "# cpu:"`}},
+		{id: "R79", want: []string{"G1: measurement 2026-10-03-linux-12cpu.txt: a comparison has n=5; at least 10 samples per side are required"}},
+		{id: "R78", want: []string{"G1: fixed variant: no benchmark ran"}},
+		{id: "R77", want: []string{"G1: broken variant does not pass TestSum"}},
+		// Retired entries: one without a proof, one proven by a go1.21 file.
+		{id: "X90"},
+		{id: "X91"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {

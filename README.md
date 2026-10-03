@@ -26,13 +26,17 @@ A rule merges only when the gate admits it:
 
 | Gate | Checks |
 |---|---|
-| G1 | The fixed variant passes N times; the broken variant fails in **N of N separate processes**, each printing the rule's declared failure signature |
-| G2 | Every Go code block on the rule's page is embedded from the repository, and every embed resolves |
+| G1 | The rule's proof holds, by kind — **race / test:** the fixed variant passes N times; the broken variant fails in **N of N separate processes**, each printing the rule's declared failure signature. **vet:** `go vet -json` finds nothing in the fixed variant and the declared analyzer in the broken one. **measure:** both variants are correct, their benchmarks run, and every measurement on record names its regime and has ≥ 10 samples per side. **none:** retired entries only, with the reason no proof is possible |
+| G2 | Every Go code block on the rule's page is embedded from a `.go` file the repository compiles, and every embed resolves |
 | G6 | The page's front matter is valid and its references resolve |
 
 ```console
 $ task gate            # in the golang container; needs Docker
+$ task measure -- rules/r01-start-sequential 1,4,12   # record a measure rule's numbers
 ```
+
+Rules live under `rules/`; rules that **were** golden and expired live under
+`retired/`, each saying which Go version retired it and what replaced it.
 
 ## Licences
 
