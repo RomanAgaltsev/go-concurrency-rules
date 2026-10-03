@@ -1,0 +1,35 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errorlint
+    - gocritic
+    # The gate runs go commands built from paths in this repository. G204 is
+    # kept on so every such call is looked at; the rest of gosec rides along.
+    - gosec
+    - misspell
+    - modernize
+    - nolintlint
+    - revive
+    - unconvert
+  settings:
+    gosec:
+      excludes:
+        - G301 # directory permissions: a work tree's dirs are 0755
+        - G304 # reading files named by rule pages is the gate's job
+        - G306 # WriteFile permissions: test fixtures are 0644
+    errcheck:
+      # The CLI's output is its job; a failed write to a closed stdout is not
+      # actionable. Every other error return stays checked.
+      # Removing a temp dir is best effort: one left behind is not a verdict.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - os.RemoveAll
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports

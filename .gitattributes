@@ -1,0 +1,2 @@
+# LF everywhere. A CRLF checkout breaks gofumpt and the snippet markers alike.
+* text=auto eol=lf
