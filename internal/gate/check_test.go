@@ -156,11 +156,34 @@ func TestCheckRefusesToCheckNothing(t *testing.T) {
 // TestMain lets the test binary stand in for a go command that never finishes,
 // so a cancel can be made to land mid-build without depending on timing.
 func TestMain(m *testing.M) {
-	if os.Getenv("GATE_TEST_FAKE_GO") == "hang" {
+	switch os.Getenv("GATE_TEST_FAKE_GO") {
+	case "hang":
 		time.Sleep(time.Minute)
 		os.Exit(0)
+	case "nocc": // what a host without a C compiler prints for go build -race
+		os.Stderr.WriteString("# runtime/cgo\ncgo: C compiler \"gcc\" not found\n")
+		os.Exit(1)
 	}
 	os.Exit(m.Run())
+}
+
+// TestRaceAvailableNoCompiler: the refusal tells a reader without Task what to
+// run — the container command itself, not only the task that wraps it.
+func TestRaceAvailableNoCompiler(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GATE_TEST_FAKE_GO", "nocc")
+	err = RaceAvailable(context.Background(), self)
+	if err == nil {
+		t.Fatal("want an error from a go that cannot build with -race")
+	}
+	for _, want := range []string{`C compiler "gcc" not found`, "docker run", "golang:1.27", "task gate"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error lacks %q:\n%v", want, err)
+		}
+	}
 }
 
 // TestRaceAvailableInterrupted: a build killed by cancellation says nothing

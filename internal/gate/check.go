@@ -93,6 +93,11 @@ func Check(ctx context.Context, opt Options) (Report, error) {
 	return rep, nil
 }
 
+// dockerGate is the gate run in the golang container, for a reader without
+// Task. exec makes the gate the process that receives Ctrl-C.
+const dockerGate = `docker run --rm --init -v "$PWD:/src" -w /src golang:1.27 ` +
+	`sh -c 'go build -o /tmp/gate ./internal/cmd/gate && exec /tmp/gate check'`
+
 // RaceAvailable reports whether this host can build with -race.
 //
 // It builds a trivial program instead of reading `go env`: a Windows host can
@@ -120,7 +125,8 @@ func RaceAvailable(ctx context.Context, goBin string) error {
 			return fmt.Errorf("cannot run %s: %w", goBin, err)
 		}
 		return fmt.Errorf("this host cannot build with -race, which needs cgo and a C compiler:\n%s\n"+
-			"run the gate in a container instead: task gate", tail(out, 5))
+			"run the gate in a container instead, from the repository root — `task gate`, or:\n    %s",
+			tail(out, 5), dockerGate)
 	}
 	return nil
 }
