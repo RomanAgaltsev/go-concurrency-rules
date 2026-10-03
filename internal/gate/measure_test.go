@@ -13,6 +13,10 @@ const goodMeasurement = `# rule: R01
 # gomaxprocs: 1,4
 # command: go test -run '^$' -bench '.' -benchmem -count 10 -cpu 1,4 [-tags broken] ./rules/r01-x; benchstat broken.txt fixed.txt
 
+goos: linux
+goarch: amd64
+pkg: github.com/RomanAgaltsev/go-concurrency-rules/rules/r01-x
+cpu: AMD Ryzen 5 3600 6-Core Processor
         │   broken.txt   │              fixed.txt              │
         │     sec/op     │   sec/op     vs base                │
 Sum       24706.00n ± 4%   39.23n ± 2%  -99.84% (p=0.000 n=10)
@@ -49,6 +53,15 @@ func TestCheckMeasurement(t *testing.T) {
 		{name: "another rule's numbers", mutate: func(s string) string {
 			return strings.Replace(s, "# rule: R01", "# rule: R27", 1)
 		}, want: "header says rule R27, but it belongs to R01"},
+		// benchstat's own pkg: line is the witness the header cannot fake: an
+		// artifact copied from another rule, header edited, still names the
+		// package it measured.
+		{name: "measured another package", mutate: func(s string) string {
+			return strings.Replace(s, "/rules/r01-x\n", "/rules/r27-y\n", 1)
+		}, want: `measured package "github.com/RomanAgaltsev/go-concurrency-rules/rules/r27-y", not rules/r01-x`},
+		{name: "no pkg line", mutate: func(s string) string {
+			return strings.Replace(s, "pkg: github.com/RomanAgaltsev/go-concurrency-rules/rules/r01-x\n", "", 1)
+		}, want: "no pkg: line"},
 		{name: "bad date", mutate: func(s string) string {
 			return strings.Replace(s, "2026-10-03", "03.10.2026", 1)
 		}, want: `header date "03.10.2026"`},
@@ -75,7 +88,7 @@ func TestCheckMeasurement(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := checkMeasurement("R01", []byte(tt.mutate(goodMeasurement)))
+			got := checkMeasurement("R01", "rules/r01-x", []byte(tt.mutate(goodMeasurement)))
 			if tt.want == "" {
 				if len(got) != 0 {
 					t.Fatalf("want no problems, got %v", got)

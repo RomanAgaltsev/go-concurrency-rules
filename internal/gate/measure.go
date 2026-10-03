@@ -26,6 +26,7 @@ var (
 	benchLineRe = regexp.MustCompile(`(?m)^Benchmark\S*\s+\d+\s`)
 	samplesRe   = regexp.MustCompile(`\bn=(\d+)(?:\+(\d+))?\)`)
 	dateRe      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+	pkgRe       = regexp.MustCompile(`(?m)^pkg: (\S+)\s*$`)
 )
 
 // proveMeasure proves a measure rule. Its claim is about cost, so nothing is
@@ -85,7 +86,7 @@ func checkMeasurements(root string, r Rule) (int, []string) {
 			problems = append(problems, fmt.Sprintf("measurement %s: %v", e.Name(), err))
 			continue
 		}
-		for _, msg := range checkMeasurement(r.ID, data) {
+		for _, msg := range checkMeasurement(r.ID, r.Dir, data) {
 			problems = append(problems, fmt.Sprintf("measurement %s: %s", e.Name(), msg))
 		}
 	}
@@ -97,7 +98,7 @@ func checkMeasurements(root string, r Rule) (int, []string) {
 
 // checkMeasurement checks one artifact: a "# key: value" header naming the
 // regime, then benchstat output comparing broken with fixed.
-func checkMeasurement(id string, data []byte) []string {
+func checkMeasurement(id, dir string, data []byte) []string {
 	header := map[string]string{}
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {
@@ -120,6 +121,14 @@ func checkMeasurement(id string, data []byte) []string {
 	}
 	if v := header["date"]; v != "" && !dateRe.MatchString(v) {
 		problems = append(problems, fmt.Sprintf("header date %q is not YYYY-MM-DD", v))
+	}
+	// benchstat copies go test's "pkg:" line into its output: a witness the
+	// header cannot fake. An artifact copied from another rule, header edited,
+	// still names the package it measured.
+	if m := pkgRe.FindSubmatch(data); m == nil {
+		problems = append(problems, "no pkg: line — benchstat prints the measured package; was this produced by scripts/measure.sh?")
+	} else if pkg := string(m[1]); pkg != dir && !strings.HasSuffix(pkg, "/"+dir) {
+		problems = append(problems, fmt.Sprintf("measured package %q, not %s", pkg, dir))
 	}
 	if !bytes.Contains(data, []byte("vs base")) {
 		problems = append(problems, "no benchstat comparison (benchstat broken.txt fixed.txt)")

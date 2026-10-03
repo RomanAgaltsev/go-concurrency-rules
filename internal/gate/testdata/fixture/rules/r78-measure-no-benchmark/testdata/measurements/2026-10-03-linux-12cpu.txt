@@ -4,11 +4,11 @@
 # os: linux/amd64
 # cpu: AMD Ryzen 5 3600 6-Core Processor
 # gomaxprocs: 1,4
-# command: go test -run '^$' -bench '.' -benchmem -count 10 -cpu 1,4 [-tags broken] ./rules/r84-measure-valid; benchstat broken.txt fixed.txt
+# command: go test -run '^$' -bench '.' -benchmem -count 10 -cpu 1,4 [-tags broken] ./rules/r78-measure-no-benchmark; benchstat broken.txt fixed.txt
 
 goos: linux
 goarch: amd64
-pkg: fixture/rules/r84-measure-valid
+pkg: fixture/rules/r78-measure-no-benchmark
 cpu: AMD Ryzen 5 3600 6-Core Processor              
         │   broken.txt   │              fixed.txt              │
         │     sec/op     │   sec/op     vs base                │
