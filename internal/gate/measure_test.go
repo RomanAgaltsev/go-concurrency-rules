@@ -17,6 +17,14 @@ const goodMeasurement = `# rule: R01
         │     sec/op     │   sec/op     vs base                │
 Sum       24706.00n ± 4%   39.23n ± 2%  -99.84% (p=0.000 n=10)
 Sum-4     38643.50n ± 2%   38.69n ± 4%  -99.90% (p=0.000 n=10)
+geomean      30.90µ        38.95n       -99.87%
+
+        │  broken.txt  │                 fixed.txt                 │
+        │     B/op     │     B/op      vs base                     │
+Sum       5.500Ki ± 0%   0.000Ki ± 0%  -100.00% (p=0.000 n=10)
+geomean   5.500Ki                      ?                       ¹ ²
+¹ summaries must be >0 to compute geomean
+² ratios must be >0 to compute geomean
 `
 
 func TestCheckMeasurement(t *testing.T) {
@@ -50,6 +58,15 @@ func TestCheckMeasurement(t *testing.T) {
 		{name: "too few samples", mutate: func(s string) string {
 			return strings.Replace(s, "n=10)\nSum-4", "n=6)\nSum-4", 1)
 		}, want: "a comparison has n=6"},
+		// benchstat prints n=A+B when the two sides have different counts: the
+		// smaller side is what the comparison rests on.
+		{name: "unequal sample counts", mutate: func(s string) string {
+			return strings.Replace(s, "-99.90% (p=0.000 n=10)", "-99.90% (p=0.030 n=10+2)", 1)
+		}, want: "a comparison has n=2"},
+		// A benchmark measured on one side only prints no (p=… n=…) at all.
+		{name: "benchmark on one side only", mutate: func(s string) string {
+			return strings.Replace(s, "Sum-4 ", "OnlyBroken      505.5n ± 1%\nSum-4 ", 1)
+		}, want: `row "OnlyBroken" has no comparison`},
 		// "~" rows: benchstat found no significant difference. The gate
 		// still requires the sample count; G3 review rejects quoting it.
 		{name: "insignificant row still counted", mutate: func(s string) string {

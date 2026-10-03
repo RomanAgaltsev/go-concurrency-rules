@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // MinSamples is the fewest benchmark samples per side a measurement may rest
@@ -23,7 +24,7 @@ var measureHeader = []string{"rule", "date", "go", "os", "cpu", "gomaxprocs", "c
 
 var (
 	benchLineRe = regexp.MustCompile(`(?m)^Benchmark\S*\s+\d+\s`)
-	samplesRe   = regexp.MustCompile(`\bn=(\d+)\)`)
+	samplesRe   = regexp.MustCompile(`\bn=(\d+)(?:\+(\d+))?\)`)
 	dateRe      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 )
 
@@ -123,15 +124,63 @@ func checkMeasurement(id string, data []byte) []string {
 	if !bytes.Contains(data, []byte("vs base")) {
 		problems = append(problems, "no benchstat comparison (benchstat broken.txt fixed.txt)")
 	}
-	counts := samplesRe.FindAllSubmatch(data, -1)
-	if len(counts) == 0 {
+	counts, oneSided := scanComparisons(data)
+	for _, name := range oneSided {
+		problems = append(problems, fmt.Sprintf("row %q has no comparison (p=… n=…): it was measured on one side only", name))
+	}
+	if bytes.Contains(data, []byte("vs base")) && len(counts) == 0 && len(oneSided) == 0 {
 		problems = append(problems, "no sample counts (n=…) in the comparison")
 	}
-	for _, m := range counts {
-		if k, _ := strconv.Atoi(string(m[1])); k < MinSamples {
+	for _, k := range counts {
+		if k < MinSamples {
 			problems = append(problems, fmt.Sprintf("a comparison has n=%d; at least %d samples per side are required", k, MinSamples))
 			break
 		}
 	}
 	return problems
+}
+
+// scanComparisons walks benchstat's comparison tables — each starts at its
+// "vs base" header and ends at a blank line — and returns the sample count
+// each data row rests on, plus the names of rows that carry no comparison.
+// benchstat prints n=10 when both sides have 10 samples and n=10+2 when they
+// differ, so the smaller side is the count; a benchmark measured on one side
+// only prints no (p=… n=…) at all.
+func scanComparisons(data []byte) (counts []int, oneSided []string) {
+	inTable := false
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	for sc.Scan() {
+		line := sc.Text()
+		switch {
+		case strings.Contains(line, "vs base"):
+			inTable = true
+			continue
+		case strings.TrimSpace(line) == "":
+			inTable = false
+			continue
+		case !inTable, strings.Contains(line, "│"), strings.HasPrefix(line, "geomean"), isFootnote(line):
+			continue // not a data row: headers, summaries, footnotes
+		}
+		m := samplesRe.FindStringSubmatch(line)
+		if m == nil {
+			oneSided = append(oneSided, strings.Fields(line)[0])
+			continue
+		}
+		n, _ := strconv.Atoi(m[1])
+		if m[2] != "" {
+			if k, _ := strconv.Atoi(m[2]); k < n {
+				n = k
+			}
+		}
+		counts = append(counts, n)
+	}
+	return counts, oneSided
+}
+
+// isFootnote reports whether a line is one of benchstat's footnotes, which
+// start with a superscript digit — a multi-byte rune, so the first byte alone
+// cannot tell.
+func isFootnote(line string) bool {
+	r, _ := utf8.DecodeRuneInString(line)
+	return strings.ContainsRune("¹²³⁴⁵⁶⁷⁸⁹", r)
 }
