@@ -1,0 +1,36 @@
+# rule: R01
+# date: 2026-10-03
+# go: go1.27.1
+# os: linux/amd64
+# cpu: AMD Ryzen 5 3600 6-Core Processor
+# gomaxprocs: 1,4,12
+# command: go test -run '^$' -bench '.' -benchmem -count 10 -cpu 1,4,12 [-tags broken] ./rules/r01-start-sequential; benchstat broken.txt fixed.txt
+
+goos: linux
+goarch: amd64
+pkg: github.com/RomanAgaltsev/go-concurrency-rules/rules/r01-start-sequential
+cpu: AMD Ryzen 5 3600 6-Core Processor              
+              │   broken.txt   │              fixed.txt              │
+              │     sec/op     │   sec/op     vs base                │
+SumSquares      290876.0n ± 4%   520.9n ± 0%  -99.82% (p=0.000 n=10)
+SumSquares-4    354816.0n ± 3%   520.2n ± 5%  -99.85% (p=0.000 n=10)
+SumSquares-12   394634.0n ± 1%   519.7n ± 3%  -99.87% (p=0.000 n=10)
+geomean            344.1µ        520.3n       -99.85%
+
+              │  broken.txt  │                fixed.txt                 │
+              │     B/op     │    B/op      vs base                     │
+SumSquares      78.33Ki ± 0%   0.00Ki ± 0%  -100.00% (p=0.000 n=10)
+SumSquares-4    78.33Ki ± 0%   0.00Ki ± 0%  -100.00% (p=0.000 n=10)
+SumSquares-12   78.33Ki ± 0%   0.00Ki ± 0%  -100.00% (p=0.000 n=10)
+geomean         78.33Ki                     ?                       ¹ ²
+¹ summaries must be >0 to compute geomean
+² ratios must be >0 to compute geomean
+
+              │ broken.txt  │                fixed.txt                 │
+              │  allocs/op  │  allocs/op   vs base                     │
+SumSquares      2.002k ± 0%   0.000k ± 0%  -100.00% (p=0.000 n=10)
+SumSquares-4    2.002k ± 0%   0.000k ± 0%  -100.00% (p=0.000 n=10)
+SumSquares-12   2.002k ± 0%   0.000k ± 0%  -100.00% (p=0.000 n=10)
+geomean         2.002k                     ?                       ¹ ²
+¹ summaries must be >0 to compute geomean
+² ratios must be >0 to compute geomean
