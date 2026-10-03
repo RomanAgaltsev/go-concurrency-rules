@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -37,12 +39,13 @@ func CheckPage(root string, r Rule) []Violation {
 	var (
 		fence     string // the open fence's run of ``` or ~~~; "" when outside a fence
 		fenceLine int
-		isGo      bool
+		inGo      bool // the open block is a Go block
+		reported  bool // this block's hand-typed Go was already reported
 	)
 	for i, line := range lines {
 		n := i + 1 // 1-based, relative to the body
 		if m := snippetRe.FindStringSubmatch(line); m != nil {
-			if msg := resolveSnippet(root, m[1]); msg != "" {
+			if msg := resolveSnippet(root, m[1], fence != "" && inGo); msg != "" {
 				bad(n, "%s", msg)
 			}
 			continue
@@ -53,15 +56,15 @@ func CheckPage(root string, r Rule) []Violation {
 				fence = ""
 				continue
 			}
-			if isGo && trimmed != "" {
+			if inGo && !reported && trimmed != "" {
 				bad(n, "hand-typed Go in a code block; embed it from the repository with --8<--")
-				isGo = false // one report per block is enough
+				reported = true // one report per block is enough
 			}
 			continue
 		}
 		if m := fenceOpenRe.FindStringSubmatch(line); m != nil {
 			fence, fenceLine = m[2], n
-			isGo = fenceLang(m[3]) == "go"
+			inGo, reported = fenceLang(m[3]) == "go", false
 		}
 	}
 	if fence != "" {
@@ -71,13 +74,14 @@ func CheckPage(root string, r Rule) []Violation {
 }
 
 // fenceLang returns the language of a fence info string: ```go, ``` go,
-// ```{.go}, ```go title="x" and ```golang all name Go.
+// ```{.go}, ```go title="x", ```golang and ```Go all name Go — Pygments
+// matches lexer names case-insensitively, so the gate must too.
 func fenceLang(info string) string {
 	f := strings.Fields(strings.NewReplacer("{", " ", "}", " ").Replace(info))
 	if len(f) == 0 {
 		return ""
 	}
-	lang := strings.TrimPrefix(f[0], ".")
+	lang := strings.ToLower(strings.TrimPrefix(f[0], "."))
 	if lang == "golang" {
 		return "go"
 	}
@@ -85,10 +89,15 @@ func fenceLang(info string) string {
 }
 
 // resolveSnippet returns why a snippet reference does not resolve, or "".
-func resolveSnippet(root, ref string) string {
+// Inside a Go block it must name a .go file outside testdata/: the page's
+// promise is that its Go is code the repository compiles and tests.
+func resolveSnippet(root, ref string, inGo bool) string {
 	file, section, hasSection := strings.Cut(ref, ":")
 	if !filepath.IsLocal(filepath.FromSlash(file)) {
 		return fmt.Sprintf("snippet %q: %s is not a path inside the repository", ref, file)
+	}
+	if inGo && (path.Ext(file) != ".go" || slices.Contains(strings.Split(file, "/"), "testdata")) {
+		return fmt.Sprintf("snippet %q: a Go code block may only embed .go files outside testdata/", ref)
 	}
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(file)))
 	if err != nil {

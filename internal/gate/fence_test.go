@@ -27,6 +27,13 @@ func TestCheckPage(t *testing.T) {
 		{name: "attribute-style info string", body: "``` {.go title=\"x\"}\nvar n int\n```\n", want: "hand-typed Go"},
 		{name: "tilde fence", body: "~~~go\nvar n int\n~~~\n", want: "hand-typed Go"},
 		{name: "missing file", body: "```go\n--8<-- \"rules/r/nope.go:counter\"\n```\n", want: "does not exist"},
+		// Pygments lowercases lexer names: ```Go is highlighted as Go.
+		{name: "capitalised Go info string", body: "```Go\nvar n int\n```\n", want: "hand-typed Go"},
+		// A Go block shows code the repository compiles and tests: a .go file,
+		// outside testdata/ (which the go command never builds as part of ./...).
+		{name: "Go block embedding a non-Go file", body: "```go\n--8<-- \"notes/x.txt\"\n```\n", want: "may only embed .go files outside testdata/"},
+		{name: "Go block embedding testdata", body: "```go\n--8<-- \"rules/r/testdata/x.go\"\n```\n", want: "may only embed .go files outside testdata/"},
+		{name: "non-Go block may embed any file", body: "```text\n--8<-- \"rules/r/broken.go\"\n```\n"},
 		{name: "path escaping the repository", body: "```go\n--8<-- \"../outside.go\"\n```\n", want: "not a path inside the repository"},
 		{name: "missing section", body: "```go\n--8<-- \"rules/r/broken.go:total\"\n```\n", want: `no "--8<-- [start:total]" marker`},
 		{name: "unclosed fence", body: "```go\n--8<-- \"rules/r/broken.go:counter\"\n", want: "never closed"},
