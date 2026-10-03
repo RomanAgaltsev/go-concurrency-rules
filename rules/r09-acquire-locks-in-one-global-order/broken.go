@@ -8,6 +8,9 @@ package r09
 // the order depends on the arguments, so Transfer(a, b) and Transfer(b, a)
 // take the same two locks in opposite orders.
 func Transfer(from, to *Account, amount int) {
+	if from == to {
+		return // one account: nothing moves, and a second Lock of a.mu would wait forever
+	}
 	from.mu.Lock()
 	defer from.mu.Unlock()
 	betweenLocks()

@@ -9,6 +9,9 @@ package r09
 // goroutine takes any two locks in the same global order, so none can hold
 // the lock another one needs while waiting for a lock that one holds.
 func Transfer(from, to *Account, amount int) {
+	if from == to {
+		return // one account: nothing moves, and a second Lock of a.mu would wait forever
+	}
 	first, second := from, to
 	if second.ID < first.ID {
 		first, second = second, first

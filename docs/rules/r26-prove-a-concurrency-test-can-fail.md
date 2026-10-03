@@ -62,8 +62,10 @@ together both run `f`:
 
 The broken check is the test most people write first, and it is green — on
 `sync.Once` and on `FlakyOnce` alike. The fixed check makes the dangerous
-interleaving happen on purpose: it holds the first call to `f` open until a second
-goroutine is calling `Do`. A correct `Initer` keeps that second caller waiting —
+interleaving happen on purpose. Both goroutines announce themselves before calling
+`Do`, and whichever call reaches `f` first holds it open until both have announced —
+whichever goroutine the scheduler happens to run first — so the other is a few
+instructions from calling `Do`. A correct `Initer` keeps that second caller waiting —
 `sync.Once` promises that no call to `Do` returns until the one call to `f` returns —
 so the first call gives up after 100 ms and the check passes. `FlakyOnce` lets the
 second caller in, and the check fails every time.

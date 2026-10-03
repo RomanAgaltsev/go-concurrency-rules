@@ -57,3 +57,22 @@ func TestOpposingTransfers(t *testing.T) {
 }
 
 // --8<-- [end:test]
+
+// TestSelfTransfer: a transfer to the same account takes no second lock.
+// Go's mutexes are not reentrant, so locking a.mu twice would wait forever.
+func TestSelfTransfer(t *testing.T) {
+	a := &Account{ID: 1, balance: 100}
+	done := make(chan struct{})
+	go func() {
+		Transfer(a, a, 10)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchdog: Transfer(a, a) is waiting for a lock it already holds")
+	}
+	if got := a.Balance(); got != 100 {
+		t.Fatalf("balance %d after a self-transfer, want 100", got)
+	}
+}

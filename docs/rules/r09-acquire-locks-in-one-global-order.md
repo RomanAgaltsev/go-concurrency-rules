@@ -62,7 +62,13 @@ Both variants share the account type:
 
 The order is by `ID`, a property of the account, not of the call. Any total order
 works — an ID, an address you have reason to trust, a level in a hierarchy — as long
-as every path that holds two of these locks uses the same one.
+as every path that holds two of these locks uses the same one. *Total* is the catch:
+the key must be unique. Two accounts with the same `ID` fall back to argument order —
+the broken variant — so equal keys need a tie-breaker, or one lock over both.
+
+Both variants return at once when `from == to`: a transfer to the same account moves
+nothing, and Go's mutexes are not reentrant — a second `Lock` of the mutex a goroutine
+already holds waits forever.
 
 ## How to spot it
 
