@@ -60,8 +60,8 @@ own slot. What it gets wrong is the price: one multiplication per goroutine.
 --8<-- "rules/r01-start-sequential/bench_test.go:bench"
 ```
 
-Measured on 2026-10-03 (AMD Ryzen 5 3600, 12 logical CPUs, linux/amd64 in Docker on
-Windows, go1.27.1), 10 samples per side, for `xs` of 1000 elements:
+Measured on 2026-10-03 (AMD Ryzen 5 3600, 12 logical CPUs, linux/amd64 in the
+`golang:1.27` container, go1.27.1), 10 samples per side, for `xs` of 1000 elements:
 
 | GOMAXPROCS | broken (goroutine per element) | fixed (loop) | broken costs |
 |---|---|---|---|
@@ -102,8 +102,9 @@ to judge them.
 ## Trade-offs & when to break it
 
 Concurrency pays when the work per goroutine is large compared with the overhead —
-I/O that waits, or CPU work measured in tens of microseconds and up — and when the
-pieces are independent. Even then, bound it: a fixed number of workers over chunks of
+which this measurement puts at roughly 0.3–0.4 µs per goroutine (290.9–394.6 µs for
+1000 of them, against 0.52 µs of actual work) — and when the pieces are independent:
+I/O that waits, or computation many times that cost. Even then, bound it: a fixed number of workers over chunks of
 the input, not one goroutine per element. Some programs are concurrent for structure
 rather than speed — a server handling independent requests — and there the question is
 correctness first, cost second.

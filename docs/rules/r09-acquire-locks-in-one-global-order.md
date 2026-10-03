@@ -78,13 +78,21 @@ comes first", "whichever the caller passed", or "it depends on the path", there 
 cycle waiting for the right timing. Callbacks run under a lock count: they may take
 locks you cannot see.
 
-**Tooling.** Little helps. The runtime reports `all goroutines are asleep -
-deadlock!` only when *every* goroutine is blocked, which a real program with any
-other goroutine running never is. `go test -race` sees no race here — both
-goroutines lock correctly; they just lock in different orders. And `testing/synctest`
+**Tooling.** Less than you would hope. The runtime reports `all goroutines are
+asleep - deadlock!` only when *every* goroutine is blocked, which a real program with
+any other goroutine running never is. `go test -race` sees no race here — both
+goroutines lock correctly; they just lock in different orders. `testing/synctest`
 cannot see it either: its documentation lists locking a `sync.Mutex` among the
 operations that are *not* durably blocking, so a bubble whose goroutines are stuck on
 mutexes never looks idle and simply hangs.
+
+Go 1.27's `goroutineleak` profile (`runtime/pprof`) is the exception, with a
+condition: it reports goroutines blocked on primitives that nothing else can reach.
+Probed with go1.27.1, an AB/BA deadlock on two accounts that are no longer referenced
+shows up — both goroutines, stuck in `sync.(*Mutex).Lock` — while the same deadlock
+on accounts a variable still holds shows nothing. Live accounts in a running program
+are usually reachable, so it helps most where a test drops its fixtures. (Its
+`Count()` reads 0 until `WriteTo` has run the detection.)
 
 ## Proof
 

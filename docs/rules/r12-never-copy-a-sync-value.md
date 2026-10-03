@@ -48,7 +48,7 @@ that holds it.
     --8<-- "rules/r12-never-copy-a-sync-value/fixed.go:stats"
     ```
 
-One character apart: `Hits` takes `s Stats` instead of `s *Stats`. The broken
+In code, one character apart: `Hits` takes `s Stats` instead of `s *Stats`. The broken
 `Hits` locks its private copy, so the lock protects nothing, and copying the struct
 reads `hits` while another goroutine's `Hit` may be writing it — a data race.
 
@@ -61,8 +61,8 @@ range` over a slice of it, and `*p` dereferences that copy it.
 **Tooling.** `go vet`'s `copylocks` analyzer reports all of these. Note what does
 *not* run it: `go test` runs only a high-confidence subset of vet (`atomic`, `bools`,
 `buildtag`, `directive`, `errorsas`, `ifaceassert`, `nilfunc`, `printf`,
-`stdversion`, `stringintconv`, `tests`), so the broken variant here builds and passes
-its tests. Run `go vet` — or golangci-lint, whose `govet` includes `copylocks` —
+`stdversion`, `stringintconv`, `tests`), so `go test` on the broken variant here
+reports nothing at all. Run `go vet` — or golangci-lint, whose `govet` includes `copylocks` —
 explicitly.
 
 ## Proof
