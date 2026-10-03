@@ -2,18 +2,29 @@
 
 package r07
 
+import "sync"
+
 // --8<-- [start:counter]
 
 // Counter counts events reported by many goroutines.
 type Counter struct {
-	n int
+	mu sync.Mutex // guards n
+	n  int
 }
 
-// Inc adds one. n++ is a read and a write; nothing orders one goroutine's
-// pair against another's, so two Incs can read the same n and one is lost.
-func (c *Counter) Inc() { c.n++ }
+// Inc adds one. Each Unlock happens before the next Lock of the same mutex,
+// so every Inc is ordered before or after every other: the missing edge.
+func (c *Counter) Inc() {
+	c.mu.Lock()
+	c.n++
+	c.mu.Unlock()
+}
 
 // Value returns the count.
-func (c *Counter) Value() int { return c.n }
+func (c *Counter) Value() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.n
+}
 
 // --8<-- [end:counter]
