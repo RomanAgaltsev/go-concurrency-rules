@@ -22,11 +22,6 @@ var (
 	tags   = []string{"read", "write", "refactor", "test", "profile"}
 	kinds  = []string{"race", "test"}
 
-	// genericMarkers appear in any failing test's output. A signature made only
-	// of these cannot tell this rule's failure from any other — including one
-	// the rule's author never intended.
-	genericMarkers = []string{"FAIL", "--- FAIL", "panic", "exit status 1", "exit status 2"}
-
 	idRe      = regexp.MustCompile(`^[RX]\d{2}$`)
 	versionRe = regexp.MustCompile(`^go1\.\d+$`)
 	testRe    = regexp.MustCompile(`^Test[A-Z_0-9]\w*$`)
@@ -159,18 +154,42 @@ func validateProof(p Proof, bad func(string, ...any)) {
 		switch t := strings.TrimSpace(s); {
 		case t == "":
 			bad("proof.signature has an empty entry, which every output contains")
-		case !slices.Contains(genericMarkers, strings.TrimRight(t, ": ")):
+		case !slices.ContainsFunc(harnessLines(p.Test), func(h string) bool { return strings.Contains(h, t) }):
 			specific = true
 		}
 	}
 	if len(p.Signature) > 0 && !specific {
 		bad("proof.signature matches any failure at all; add what THIS rule's failure prints")
 	}
+	if p.Kind == "race" && len(p.Signature) > 0 && !slices.ContainsFunc(p.Signature, func(s string) bool { return strings.Contains(s, raceWarning) }) {
+		bad("kind race must list %q in proof.signature: the detector, not an assertion, is a race proof", raceWarning)
+	}
 	if p.Runs < MinRuns {
 		bad("proof.runs is %d; at least %d separate processes are required", p.Runs, MinRuns)
 	}
 	if p.Analyzer != "" || p.Reason != "" {
 		bad("proof.analyzer and proof.reason do not apply to kind %s", p.Kind)
+	}
+}
+
+// raceWarning is what the race detector prints for every race it reports.
+const raceWarning = "WARNING: DATA RACE"
+
+// harnessLines is text the testing package prints for test on any run —
+// passing, failing or hanging. A signature entry found inside one of them
+// says nothing about why the broken variant failed: the gate itself runs every
+// process with -test.v, so "=== RUN   TestX" is in every output, and a
+// -test.timeout panic prints "running tests:" and the test's name.
+func harnessLines(test string) []string {
+	return []string{
+		"=== RUN   " + test,
+		"--- FAIL: " + test + " (",
+		"--- PASS: " + test + " (",
+		"panic: test timed out after",
+		"running tests:",
+		"goroutine ",
+		"ok  ", "PASS", "FAIL",
+		"exit status 1", "exit status 2",
 	}
 }
 

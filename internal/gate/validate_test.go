@@ -76,8 +76,25 @@ func TestValidate(t *testing.T) {
 			r.Proof.Signature = []string{"WARNING: DATA RACE", " "}
 		}, want: "empty entry"},
 		{name: "generic signature only", mutate: func(_ *testing.T, _ string, r *Rule) {
-			r.Proof.Signature = []string{"--- FAIL:", "panic:"}
+			r.Proof.Kind, r.Proof.Signature = "test", []string{"--- FAIL:", "panic:"}
 		}, want: "matches any failure at all"},
+		// The harness prints these for every run of the test, broken or fixed,
+		// failing or hanging: none of them says why the broken variant failed.
+		{name: "test name as signature", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof.Kind, r.Proof.Signature = "test", []string{"TestConcurrentInc"}
+		}, want: "matches any failure at all"},
+		{name: "FAIL line of the test as signature", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof.Kind, r.Proof.Signature = "test", []string{"--- FAIL: TestConcurrentInc"}
+		}, want: "matches any failure at all"},
+		{name: "timeout header as signature", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof.Kind, r.Proof.Signature = "test", []string{"running tests:"}
+		}, want: "matches any failure at all"},
+		{name: "specific panic message", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof.Kind, r.Proof.Signature = "test", []string{"panic: send on closed channel"}
+		}},
+		{name: "race proof without the race warning", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.Proof.Signature = []string{"lost 1 of 4000 updates"}
+		}, want: `kind race must list "WARNING: DATA RACE"`},
 		{name: "generic marker beside a specific one", mutate: func(_ *testing.T, _ string, r *Rule) {
 			r.Proof.Signature = []string{"--- FAIL: TestConcurrentInc", "WARNING: DATA RACE"}
 		}},

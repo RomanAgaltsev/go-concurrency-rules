@@ -61,15 +61,23 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 	timeout := p.timeout()
 
 	// The fixed variant: N passes in one process. -v so the passes can be
-	// counted — a -run pattern that matches nothing also exits 0.
-	out, err := p.goCmd(ctx, timeout*time.Duration(pr.Runs), "test", "-race", "-shuffle=on", "-v",
-		fmt.Sprintf("-count=%d", pr.Runs), "-timeout", (timeout * time.Duration(pr.Runs)).String(), "-run", run, pkg)
+	// counted — a -run pattern that matches nothing also exits 0. One process
+	// timeout covers all N: a fixed variant that hangs must be stopped in
+	// minutes, with its reason, not after N times as long.
+	out, err := p.goCmd(ctx, timeout, "test", "-race", "-shuffle=on", "-v",
+		fmt.Sprintf("-count=%d", pr.Runs), "-timeout", timeout.String(), "-run", run, pkg)
 	if err != nil {
-		return bad("fixed variant does not pass %s:\n%s", pr.Test, tail(out, 20)), ""
+		return bad("fixed variant does not pass %s:\n%s", pr.Test, excerpt(out)), ""
 	}
 	passRe := regexp.MustCompile(`(?m)^--- PASS: ` + regexp.QuoteMeta(pr.Test) + ` \(`)
 	if got := len(passRe.FindAll(out, -1)); got != pr.Runs {
 		return bad("fixed variant: %s passed %d times, want %d — does the test exist?", pr.Test, got, pr.Runs), ""
+	}
+	// A signature the fixed run prints as well cannot tell broken from fixed.
+	for _, s := range pr.Signature {
+		if bytes.Contains(out, []byte(s)) {
+			return bad("signature %q also appears in the fixed variant's output, so it cannot tell broken from fixed", s), ""
+		}
 	}
 
 	// The broken variant: build once, run N separate processes.
@@ -87,7 +95,7 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 	}
 
 	results := p.runBroken(ctx, bin, r)
-	var withSig, passed, unsigned, notRun int
+	var withSig, passed, unsigned, timedOut, notRun int
 	var first *runResult // the first run that does not count towards N/N
 	for i := range results {
 		res := &results[i]
@@ -96,6 +104,8 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 			notRun++
 		case !res.failed:
 			passed++
+		case res.timedOut:
+			timedOut++
 		case res.missing != "":
 			unsigned++
 		default:
@@ -107,11 +117,13 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 		}
 	}
 	if first != nil {
-		msg := fmt.Sprintf("broken variant failed with the signature in %d/%d runs (%d passed, %d failed without it, %d did not start)",
-			withSig, pr.Runs, passed, unsigned, notRun)
+		msg := fmt.Sprintf("broken variant failed with the signature in %d/%d runs (%d passed, %d failed without it, %d timed out, %d did not start)",
+			withSig, pr.Runs, passed, unsigned, timedOut, notRun)
 		switch {
 		case first.startErr != nil:
 			msg += fmt.Sprintf("; first run did not start: %v", first.startErr)
+		case first.timedOut:
+			msg += fmt.Sprintf("; a hang is never a proof — make the broken variant fail fast (a watchdog). First run:\n%s", excerpt(first.out))
 		case first.failed:
 			msg += fmt.Sprintf("; first run without the signature lacks %q:\n%s", first.missing, excerpt(first.out))
 		default:
@@ -125,6 +137,7 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 
 type runResult struct {
 	failed   bool   // the process ran and exited non-zero
+	timedOut bool   // when failed: it was stopped by a timeout, not by the rule's failure
 	missing  string // when failed: the first signature substring absent from the output, or ""
 	startErr error  // the process never ran, which proves nothing about the rule
 	out      []byte
@@ -165,6 +178,12 @@ func (p Prover) runOnce(ctx context.Context, bin string, r Rule) runResult {
 		res.failed = true
 	default:
 		res.startErr = err
+	}
+	// A run stopped by a timeout — the test binary's own, or this process's
+	// deadline — failed because the gate stopped it. Its stack dump can print
+	// almost anything, signature included; it proves nothing about the rule.
+	if res.failed && (bytes.Contains(out, []byte("panic: test timed out after")) || ctx.Err() != nil) {
+		res.timedOut = true
 	}
 	if res.failed {
 		for _, s := range r.Proof.Signature {

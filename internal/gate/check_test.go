@@ -56,7 +56,14 @@ func TestCheckFixture(t *testing.T) {
 		{id: "R94", want: []string{"G1: 9/10 runs (1 passed"}},
 		{id: "R95", want: []string{"G1: TestMissing passed 0 times, want 10"}},
 		{id: "R96", want: []string{"G6: alternative R99 does not exist", "G2: hand-typed Go"}},
-		{id: "R97", want: []string{"G1: 0/10 runs (0 passed, 10 failed without it"}},
+		{id: "R97", want: []string{"G1: 0/10 runs (0 passed, 0 failed without it, 10 timed out"}},
+		// A hang is never a signed failure, even when the signature is text
+		// the timeout's stack dump happens to print.
+		{id: "R89", want: []string{"G1: 0/10 runs (0 passed, 0 failed without it, 10 timed out"}},
+		// A signature the fixed run prints cannot tell broken from fixed.
+		{id: "R88", want: []string{`G1: signature "checking the answer" also appears in the fixed variant's output`}},
+		// A fixed variant that hangs is stopped by one process timeout, not N.
+		{id: "R87", want: []string{"G1: fixed variant does not pass TestAnswer"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
@@ -84,9 +91,11 @@ func TestCheckFixture(t *testing.T) {
 	if len(rep.Admitted)+len(got) != len(tests) {
 		t.Errorf("the fixture holds %d rules but the report covers %d", len(tests), len(rep.Admitted)+len(got))
 	}
-	// A hang is refused, and the excerpt says why.
-	if vs := got["R97"]; len(vs) == 1 && !strings.Contains(vs[0].Msg, "test timed out") {
-		t.Errorf("R97's violation should show the timeout, got:\n%s", vs[0].Msg)
+	// A hang is refused, and the message says why — for either variant.
+	for _, id := range []string{"R97", "R89", "R87"} {
+		if vs := got[id]; len(vs) == 1 && !strings.Contains(vs[0].Msg, "test timed out") {
+			t.Errorf("%s's violation should show the timeout, got:\n%s", id, vs[0].Msg)
+		}
 	}
 }
 
