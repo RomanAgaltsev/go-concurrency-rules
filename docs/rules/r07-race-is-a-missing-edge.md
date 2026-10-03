@@ -27,13 +27,15 @@ sources:
 ## Why
 
 Two memory accesses race when they touch the same variable, at least one of them
-writes, and **neither happens before the other**. That last clause is the whole
-definition. Go's memory model does not promise that the program sees the writes in
-the order the source lists them; it promises only what its *happens-before* edges
-imply. Within one goroutine, statement order gives you edges for free. Between
-goroutines, every edge comes from synchronisation: a channel send and the receive
-that takes it, an `Unlock` and the next `Lock` of the same mutex, a `WaitGroup.Done`
-and the `Wait` it releases, an atomic store and the load that observes it.
+writes, **neither happens before the other**, and they are not all `sync/atomic`
+operations. The happens-before clause is the one that matters here. Go's memory
+model does not promise that the program sees the writes in the order the source
+lists them; it promises only what its *happens-before* edges imply. Within one
+goroutine, statement order gives you edges for free. Between goroutines, every edge
+comes from synchronisation: a `go` statement and the start of the goroutine it
+creates, a channel send and the receive that takes it, an `Unlock` and the next
+`Lock` of the same mutex, a `WaitGroup.Done` and the `Wait` it releases, an atomic
+store and the load that observes it.
 
 So a race report is not "two goroutines ran at once". It names two accesses that no
 chain of edges connects. Reordering statements, adding a `time.Sleep`, or making
@@ -108,9 +110,11 @@ read of a word-sized variable observes some value that was actually written — 
 that is all it promises: which write you see is up to the race, values larger than a
 word can be observed half-updated, and an implementation may report the race and
 stop the program. What *is* a choice is which edge to add. A
-mutex is the general answer; a single word that is only ever loaded and stored whole
-can use an atomic instead; state that one goroutine owns needs no edge at all,
-because nothing else touches it.
+mutex is the general answer. A counter can instead be one atomic read-modify-write
+(`atomic.Int64.Add`) — but not an atomic `Load` followed by an atomic `Store`: that
+pair has edges, so the detector stays quiet, and two goroutines can still read the
+same value and lose an update. The edge has to cover the whole read-modify-write.
+State that one goroutine owns needs no edge at all, because nothing else touches it.
 
 ## Alternatives
 
