@@ -40,6 +40,7 @@ type collection struct{ docs, code string }
 
 var collections = []collection{
 	{docs: "docs/rules", code: "rules"},
+	{docs: "docs/retired", code: "retired"},
 }
 
 // Load reads every rule page under root.
