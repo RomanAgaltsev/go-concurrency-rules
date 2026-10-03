@@ -1,0 +1,46 @@
+version: '3'
+
+vars:
+  # The race detector needs cgo and a C compiler; a Windows checkout usually
+  # has neither (and may still report CGO_ENABLED=1). The container is the way
+  # round it, and it is the platform CI runs on.
+  GO_IMAGE: "golang:1.27"
+  DOCKER_RUN: >-
+    docker run --rm
+    -v "{{.ROOT_DIR | replace "\\" "/"}}:/src"
+    -v gcr-modcache:/go/pkg/mod
+    -v gcr-buildcache:/root/.cache/go-build
+    -w /src {{.GO_IMAGE}}
+
+tasks:
+  test:
+    desc: Unit tests WITHOUT -race — a partial check; proof-running tests skip
+    cmds:
+      # Without -v a skip prints nothing, so a green line here would read like
+      # the whole suite passed. Say what it is.
+      - echo "NOTE -- no -race. Tests that run proofs SKIP here; task test:docker runs them."
+      - go test -shuffle=on ./...
+
+  test:docker:
+    desc: Every test under -race, in the golang container
+    cmds:
+      - "{{.DOCKER_RUN}} go test -race -shuffle=on ./..."
+
+  lint:
+    desc: golangci-lint v2 (sees the fixed variants only — broken.go is behind a build tag)
+    cmds:
+      - golangci-lint run
+
+  gate:
+    desc: The admission gate over every rule, in the golang container (needs -race)
+    cmds:
+      # Build, then run: `go run` reports every non-zero exit as 1, which would
+      # erase the difference between "refused" (1) and "could not check" (2).
+      - "{{.DOCKER_RUN}} sh -c 'go build -o /tmp/gate ./internal/cmd/gate && /tmp/gate check {{.CLI_ARGS}}'"
+
+  ci:
+    desc: What CI runs, from this machine
+    cmds:
+      - task: lint
+      - task: test:docker
+      - task: gate
