@@ -6,7 +6,7 @@ vars:
   # round it, and it is the platform CI runs on.
   GO_IMAGE: "golang:1.27"
   DOCKER_RUN: >-
-    docker run --rm
+    docker run --rm --init
     -v "{{.ROOT_DIR | replace "\\" "/"}}:/src"
     -v gcr-modcache:/go/pkg/mod
     -v gcr-buildcache:/root/.cache/go-build
@@ -36,7 +36,9 @@ tasks:
     cmds:
       # Build, then run: `go run` reports every non-zero exit as 1, which would
       # erase the difference between "refused" (1) and "could not check" (2).
-      - "{{.DOCKER_RUN}} sh -c 'go build -o /tmp/gate ./internal/cmd/gate && /tmp/gate check {{.CLI_ARGS}}'"
+      # exec (and --init above): without them sh stays PID 1, which ignores the
+      # SIGINT docker forwards, so Ctrl-C would never reach the gate.
+      - "{{.DOCKER_RUN}} sh -c 'go build -o /tmp/gate ./internal/cmd/gate && exec /tmp/gate check {{.CLI_ARGS}}'"
 
   ci:
     desc: What CI runs, from this machine
