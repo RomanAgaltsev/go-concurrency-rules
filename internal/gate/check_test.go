@@ -161,7 +161,7 @@ func TestMain(m *testing.M) {
 		time.Sleep(time.Minute)
 		os.Exit(0)
 	case "nocc": // what a host without a C compiler prints for go build -race
-		os.Stderr.WriteString("# runtime/cgo\ncgo: C compiler \"gcc\" not found\n")
+		_, _ = os.Stderr.WriteString("# runtime/cgo\ncgo: C compiler \"gcc\" not found\n")
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
