@@ -15,6 +15,9 @@ cpus=${2:?$usage}
 bench=${3:-.}
 
 id=$(basename "$dir" | cut -d- -f1 | tr '[:lower:]' '[:upper:]')
+# Before the benchmarks, not after: a CPU this script cannot name would cost
+# minutes of measuring for an artifact the gate refuses.
+cpu=$(sh "$(dirname "$0")/cpu-name.sh")
 benchstat=golang.org/x/perf/cmd/benchstat@v0.0.0-20260929162123-406019bb8b68
 tmp=$(mktemp -d)
 
@@ -31,7 +34,7 @@ mkdir -p "$(dirname "$out")"
 	echo "# date: $date"
 	echo "# go: $(go env GOVERSION)"
 	echo "# os: $(go env GOOS)/$(go env GOARCH)"
-	echo "# cpu: $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+	echo "# cpu: $cpu"
 	echo "# gomaxprocs: $cpus"
 	echo "# command: go test -run '^\$' -bench '$bench' -benchmem -count 10 -cpu $cpus [-tags broken] ./$dir; benchstat broken.txt fixed.txt"
 	echo
