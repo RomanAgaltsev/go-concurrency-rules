@@ -7,18 +7,38 @@ CI checks both directions on every change.
 > Not to be confused with a concurrency *exercise* gym: this is a reference. You
 > consult a rule, run its proof, and change the code to see what breaks.
 
-## Run a rule's proof
+**Read the rules:** https://romanagaltsev.github.io/go-concurrency-rules/
 
-Every rule is a Go package under `rules/`. The build tag `broken` selects the
-broken variant; the same test runs against either.
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/RomanAgaltsev/go-concurrency-rules)
+
+## Run a rule
+
+```console
+$ task rule -- R07
+```
+
+runs the rule's fixed and broken code once each and explains what happened. Every
+rule is a Go package under `rules/`; the build tag `broken` selects the broken
+variant, and the same test runs against either:
 
 ```console
 $ go test -race ./rules/r07-race-is-a-missing-edge/                # fixed: ok
 $ go test -race -tags broken ./rules/r07-race-is-a-missing-edge/   # broken: WARNING: DATA RACE
 ```
 
-`-race` needs cgo and a C compiler. Without one (the Windows default), run it in a
-container: `task test:docker`.
+`-race` needs cgo and a C compiler. Without one (the Windows default), `task rule`
+says so and shows the container command; GitHub Codespaces has everything.
+
+## The site
+
+The pages under `docs/` are built with [Zensical](https://zensical.org), pinned in
+`requirements-docs.txt`. The group, activity and Retired index pages are generated
+from the rules' front matter by `task gen`; CI fails if they are stale.
+
+```console
+$ task docs:serve          # with Python: pip install -r requirements-docs.txt
+$ task docs:serve:docker   # without Python, in a container
+```
 
 ## The admission gate
 
