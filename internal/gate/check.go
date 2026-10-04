@@ -25,6 +25,9 @@ type Options struct {
 type Admitted struct {
 	ID      string
 	Summary string // what the proof ran, in one line
+	// Proven is false for a retired entry admitted with proof kind none:
+	// nothing was run, and a total must not count it as a proof.
+	Proven bool
 }
 
 // Report is the outcome of a gate run.
@@ -78,25 +81,35 @@ func Check(ctx context.Context, opt Options) (Report, error) {
 			rep.Violations = append(rep.Violations, own...)
 			continue
 		}
-		pvs, summary := p.Prove(ctx, r)
+		pvs, summary, err := p.Prove(ctx, r)
 		if err := ctx.Err(); err != nil {
 			// Interrupted: the killed processes say nothing about the rule, and
 			// reporting them as failures would be a verdict nobody reached.
 			return Report{}, fmt.Errorf("interrupted while proving %s: %w", r.ID, err)
 		}
+		if err != nil {
+			// The gate could not run the proof: no verdict either way.
+			return Report{}, fmt.Errorf("proving %s: %w", r.ID, err)
+		}
 		own = append(own, pvs...)
 		if len(own) == 0 {
-			rep.Admitted = append(rep.Admitted, Admitted{ID: r.ID, Summary: summary})
+			rep.Admitted = append(rep.Admitted, Admitted{ID: r.ID, Summary: summary, Proven: r.Proof.Kind != "none"})
 		}
 		rep.Violations = append(rep.Violations, own...)
 	}
-	// Every other page on the site, unless the run was narrowed to some rules.
+	// Every other page on the site, and every code directory without a page,
+	// unless the run was narrowed to some rules.
 	if len(opt.IDs) == 0 {
 		site, err := CheckSitePages(opt.Root, rules)
 		if err != nil {
 			return Report{}, err
 		}
+		orphans, err := CheckCodeDirs(opt.Root)
+		if err != nil {
+			return Report{}, err
+		}
 		rep.Violations = append(rep.Violations, site...)
+		rep.Violations = append(rep.Violations, orphans...)
 	}
 	return rep, nil
 }

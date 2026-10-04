@@ -55,16 +55,16 @@ func Explain(ctx context.Context, opt Options, id string, race bool, w io.Writer
 				dockerGateCmd("run "+r.ID))
 			return false, ErrNeedsRace
 		}
-		ok = p.explainTest(ctx, r, true, w)
+		ok, err = p.explainTest(ctx, r, true, w)
 	case "test":
 		if !race {
 			fmt.Fprint(w, "(without -race: this host has no C compiler, and this rule's proof does not need it)\n\n")
 		}
-		ok = p.explainTest(ctx, r, race, w)
+		ok, err = p.explainTest(ctx, r, race, w)
 	case "vet":
-		ok = p.explainVet(ctx, r, w)
+		ok, err = p.explainVet(ctx, r, w)
 	case "measure":
-		ok = p.explainMeasure(ctx, r, race, w)
+		ok, err = p.explainMeasure(ctx, r, race, w)
 	case "none":
 		fmt.Fprintf(w, "No proof: %s\n", r.Proof.Reason)
 		return true, nil
@@ -75,6 +75,9 @@ func Explain(ctx context.Context, opt Options, id string, race bool, w io.Writer
 	// interruption, not the verdict it would otherwise read as (as Check does).
 	if err := ctx.Err(); err != nil {
 		return false, fmt.Errorf("interrupted while running %s: %w", r.ID, err)
+	}
+	if err != nil { // errCannotRun: no verdict either way
+		return false, fmt.Errorf("running %s: %w", r.ID, err)
 	}
 	return ok, nil
 }
@@ -92,22 +95,34 @@ func testArgs(r Rule, race, broken bool) []string {
 	return append(args, "./"+r.Dir)
 }
 
-// runShown prints the command, runs it, and returns its output and error.
+// runShown prints the command, runs it, and returns its output and error. An
+// error wrapping errCannotRun means the command never ran.
 func (p Prover) runShown(ctx context.Context, w io.Writer, args []string) ([]byte, error) {
 	fmt.Fprintf(w, "$ go %s\n", strings.Join(args, " "))
-	return p.goCmd(ctx, p.timeout(), args...)
+	out, err := p.goCmd(ctx, p.timeout(), args...)
+	if cerr := cannotRun(err); cerr != nil {
+		return out, cerr
+	}
+	return out, err
 }
 
-func (p Prover) explainTest(ctx context.Context, r Rule, race bool, w io.Writer) bool {
+func (p Prover) explainTest(ctx context.Context, r Rule, race bool, w io.Writer) (bool, error) {
 	ok := true
-	if out, err := p.runShown(ctx, w, testArgs(r, race, false)); err != nil {
+	out, err := p.runShown(ctx, w, testArgs(r, race, false))
+	switch {
+	case errors.Is(err, errCannotRun):
+		return false, err
+	case err != nil:
 		fmt.Fprintf(w, "fixed: FAILED — the fixed variant should pass:\n%s\n\n", excerpt(out))
 		ok = false
-	} else {
+	default:
 		fmt.Fprint(w, "fixed: passed\n\n")
 	}
 
-	out, err := p.runShown(ctx, w, testArgs(r, race, true))
+	out, err = p.runShown(ctx, w, testArgs(r, race, true))
+	if errors.Is(err, errCannotRun) {
+		return false, err
+	}
 	missing := ""
 	for _, s := range r.Proof.Signature {
 		if !bytes.Contains(out, []byte(s)) {
@@ -118,24 +133,26 @@ func (p Prover) explainTest(ctx context.Context, r Rule, race bool, w io.Writer)
 	switch {
 	case err == nil:
 		fmt.Fprint(w, "broken: passed — the broken variant should fail\n")
-		return false
+		return false, nil
 	case missing != "":
 		fmt.Fprintf(w, "broken: failed, but without %q — not the failure this rule predicts:\n%s\n", missing, excerpt(out))
-		return false
+		return false, nil
 	default:
 		fmt.Fprintf(w, "broken: failed, printing %q — the failure this rule predicts\n", r.Proof.Signature[0])
 	}
 	fmt.Fprint(w, "\nThe admission gate runs the broken variant as separate processes and requires every one to fail like this.\n")
-	return ok
+	return ok, nil
 }
 
-func (p Prover) explainVet(ctx context.Context, r Rule, w io.Writer) bool {
+func (p Prover) explainVet(ctx context.Context, r Rule, w io.Writer) (bool, error) {
 	pkg := "./" + r.Dir
 	an := r.Proof.Analyzer
 	ok := true
 
 	fmt.Fprintf(w, "$ go vet -json %s\n", pkg)
 	switch fixed, err := p.vet(ctx, pkg); {
+	case errors.Is(err, errCannotRun):
+		return false, err
 	case err != nil:
 		fmt.Fprintf(w, "fixed: %v\n\n", err)
 		ok = false
@@ -148,32 +165,43 @@ func (p Prover) explainVet(ctx context.Context, r Rule, w io.Writer) bool {
 
 	fmt.Fprintf(w, "$ go vet -json -tags broken %s\n", pkg)
 	broken, err := p.vet(ctx, "-tags", "broken", pkg)
+	if errors.Is(err, errCannotRun) {
+		return false, err
+	}
 	if err != nil {
 		fmt.Fprintf(w, "broken: %v\n", err)
-		return false
+		return false, nil
 	}
 	if len(broken[an]) == 0 {
 		fmt.Fprintf(w, "broken: go vet reports no %s — the broken variant should trip it\n", an)
-		return false
+		return false, nil
 	}
 	for _, d := range broken[an] {
 		fmt.Fprintf(w, "broken: %s — %s%s: %s\n", an, posnFile(d.Posn), posnRe.FindString(d.Posn), d.Message)
 	}
-	return ok
+	return ok, nil
 }
 
-func (p Prover) explainMeasure(ctx context.Context, r Rule, race bool, w io.Writer) bool {
+func (p Prover) explainMeasure(ctx context.Context, r Rule, race bool, w io.Writer) (bool, error) {
 	ok := true
-	if out, err := p.runShown(ctx, w, testArgs(r, race, false)); err != nil {
+	out, err := p.runShown(ctx, w, testArgs(r, race, false))
+	switch {
+	case errors.Is(err, errCannotRun):
+		return false, err
+	case err != nil:
 		fmt.Fprintf(w, "fixed: FAILED — the fixed variant should pass:\n%s\n\n", excerpt(out))
 		ok = false
-	} else {
+	default:
 		fmt.Fprint(w, "fixed: passed\n\n")
 	}
-	if out, err := p.runShown(ctx, w, testArgs(r, race, true)); err != nil {
+	out, err = p.runShown(ctx, w, testArgs(r, race, true))
+	switch {
+	case errors.Is(err, errCannotRun):
+		return false, err
+	case err != nil:
 		fmt.Fprintf(w, "broken: failed — a measure rule's broken variant must be correct, only slower:\n%s\n\n", excerpt(out))
 		ok = false
-	} else {
+	default:
 		fmt.Fprint(w, "broken: passed (it is correct, only slower)\n\n")
 	}
 
@@ -187,12 +215,11 @@ func (p Prover) explainMeasure(ctx context.Context, r Rule, race bool, w io.Writ
 	}
 	if newest == "" {
 		fmt.Fprintf(w, "No measurement on record in %s.\n", dir)
-		return false
+		return false, nil
 	}
 	data, err := os.ReadFile(filepath.Join(p.Root, filepath.FromSlash(dir), newest))
 	if err != nil {
-		fmt.Fprintf(w, "Cannot read %s/%s: %v\n", dir, newest, err)
-		return false
+		return false, fmt.Errorf("%w: %w", errCannotRun, err)
 	}
 	fmt.Fprintf(w, "The cost, as measured (%s/%s):\n\n%s\n", dir, newest, firstComparison(data))
 	cpus := "1,4"
@@ -200,7 +227,7 @@ func (p Prover) explainMeasure(ctx context.Context, r Rule, race bool, w io.Writ
 		cpus = string(m[1])
 	}
 	fmt.Fprintf(w, "Re-measure on this machine: task measure -- %s %s\n", r.Dir, cpus)
-	return ok
+	return ok, nil
 }
 
 // firstComparison returns benchstat's first comparison table: its two header

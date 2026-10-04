@@ -26,7 +26,7 @@ type vetDiag struct {
 // Both directions are judged on the parsed JSON, never on the exit code:
 // plain go vet names no analyzer, and go vet -json exits 0 even when it
 // reports diagnostics (spec §15 P6).
-func (p Prover) proveVet(ctx context.Context, r Rule) ([]Violation, string) {
+func (p Prover) proveVet(ctx context.Context, r Rule) ([]Violation, string, error) {
 	bad := func(format string, args ...any) []Violation {
 		return []Violation{{Rule: r.ID, Gate: "G1", Msg: fmt.Sprintf(format, args...)}}
 	}
@@ -34,23 +34,29 @@ func (p Prover) proveVet(ctx context.Context, r Rule) ([]Violation, string) {
 	an := r.Proof.Analyzer
 
 	fixed, err := p.vet(ctx, pkg)
+	if errors.Is(err, errCannotRun) {
+		return nil, "", err
+	}
 	if err != nil {
-		return bad("fixed variant %v", err), ""
+		return bad("fixed variant %v", err), "", nil
 	}
 	if len(fixed) > 0 {
-		return bad("fixed variant has go vet diagnostics: %s", describeVet(fixed)), ""
+		return bad("fixed variant has go vet diagnostics: %s", describeVet(fixed)), "", nil
 	}
 
 	broken, err := p.vet(ctx, "-tags", "broken", pkg)
+	if errors.Is(err, errCannotRun) {
+		return nil, "", err
+	}
 	if err != nil {
-		return bad("broken variant %v", err), ""
+		return bad("broken variant %v", err), "", nil
 	}
 	if len(broken[an]) == 0 {
 		found := "nothing"
 		if len(broken) > 0 {
 			found = strings.Join(slices.Sorted(maps.Keys(broken)), ", ")
 		}
-		return bad("go vet -tags broken reported no %s diagnostic (it reported: %s)", an, found), ""
+		return bad("go vet -tags broken reported no %s diagnostic (it reported: %s)", an, found), "", nil
 	}
 	// The diagnostic must come from broken.go. Any file built only with
 	// -tags broken would otherwise do, even with broken.go identical to fixed.go.
@@ -64,9 +70,9 @@ func (p Prover) proveVet(ctx context.Context, r Rule) ([]Violation, string) {
 		}
 	}
 	if inBroken == 0 {
-		return bad("go vet -tags broken reported %s only outside broken.go (%s)", an, strings.Join(elsewhere, ", ")), ""
+		return bad("go vet -tags broken reported %s only outside broken.go (%s)", an, strings.Join(elsewhere, ", ")), "", nil
 	}
-	return nil, fmt.Sprintf("vet: fixed is clean; broken.go trips %s (%d diagnostic(s))", an, inBroken)
+	return nil, fmt.Sprintf("vet: fixed is clean; broken.go trips %s (%d diagnostic(s))", an, inBroken), nil
 }
 
 // posnRe matches the line:column suffix of a vet position. The path before it
@@ -93,6 +99,9 @@ func (p Prover) vet(ctx context.Context, args ...string) (map[string][]vetDiag, 
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("go vet did not finish: %w", ctx.Err())
+		}
+		if err := cannotRun(err); err != nil {
+			return nil, err
 		}
 		return nil, fmt.Errorf("does not build (go vet -json: %w):\n%s", err, excerpt(stderr.Bytes()))
 	}

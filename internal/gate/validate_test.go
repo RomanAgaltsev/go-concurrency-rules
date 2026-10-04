@@ -48,6 +48,13 @@ func writeTwin(t *testing.T, root, dir, brokenTag, fixedTag string) {
 	}
 }
 
+func writeCode(t *testing.T, root, dir, name, src string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(dir), name), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -135,6 +142,18 @@ func TestValidate(t *testing.T) {
 			r.Status, r.RetiredIn, r.ReplacedBy = "retired", "go1.23", "nothing"
 			r.Proof = Proof{Kind: "none"}
 		}, want: "proof.reason is empty"},
+		{name: "retired without a proof", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.ID, r.Slug, r.Page, r.Dir = "X02", "x02-gone", "docs/retired/x02-gone.md", "retired/x02-gone"
+			r.Status, r.RetiredIn, r.ReplacedBy = "retired", "go1.23", "nothing"
+			r.Proof = Proof{Kind: "none", Reason: "the old behaviour cannot be selected"}
+		}},
+		// Code nothing proves would sit in the repository looking like a proof.
+		{name: "retired without a proof, but with code", mutate: func(t *testing.T, root string, r *Rule) {
+			r.ID, r.Slug, r.Page, r.Dir = "X02", "x02-gone", "docs/retired/x02-gone.md", "retired/x02-gone"
+			r.Status, r.RetiredIn, r.ReplacedBy = "retired", "go1.23", "nothing"
+			r.Proof = Proof{Kind: "none", Reason: "the old behaviour cannot be selected"}
+			writeTwin(t, root, r.Dir, "//go:build broken", "//go:build !broken")
+		}, want: "kind none, but code directory retired/x02-gone exists"},
 		{name: "none on an active rule", mutate: func(_ *testing.T, _ string, r *Rule) {
 			r.Proof = Proof{Kind: "none", Reason: "too hard"}
 		}, want: "kind none is only for retired entries"},
@@ -152,6 +171,16 @@ func TestValidate(t *testing.T) {
 		{name: "retired twin with a go1.21 term", mutate: func(t *testing.T, root string, r *Rule) {
 			writeTwin(t, root, r.Dir, "//go:build broken && go1.21", "//go:build !broken")
 		}},
+		// The same test runs against both variants: that is the proof's shape.
+		{name: "test file without a tag", mutate: func(t *testing.T, root string, r *Rule) {
+			writeCode(t, root, r.Dir, "rule_test.go", "package r\n")
+		}},
+		{name: "test file only in the broken build", mutate: func(t *testing.T, root string, r *Rule) {
+			writeCode(t, root, r.Dir, "rule_test.go", "//go:build broken\n\npackage r\n")
+		}, want: "rule_test.go: build constraint \"broken\" — a test file must build with both variants"},
+		{name: "benchmark file only in the fixed build", mutate: func(t *testing.T, root string, r *Rule) {
+			writeCode(t, root, r.Dir, "bench_test.go", "//go:build !broken\n\npackage r\n")
+		}, want: "bench_test.go: build constraint \"!broken\""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -173,6 +202,43 @@ func TestValidate(t *testing.T) {
 				t.Fatalf("got %v, want a G6 violation mentioning %q", vs[0], tt.want)
 			}
 		})
+	}
+}
+
+// TestCheckCodeDirs: a code directory without a page is neither proved nor
+// published — a renamed page leaves one behind, and nothing else notices.
+func TestCheckCodeDirs(t *testing.T) {
+	root := t.TempDir()
+	r := validRule(t, root)
+	writeTwin(t, root, "rules/r08-orphan", "//go:build broken", "//go:build !broken")
+	writeTwin(t, root, "retired/x05-orphan", "//go:build broken", "//go:build !broken")
+	for _, page := range []string{r.Page, "docs/retired/x05-orphan.txt"} { // .txt: not a page
+		p := filepath.Join(root, filepath.FromSlash(page))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	vs, err := CheckCodeDirs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, v := range vs {
+		if v.Gate != "G6" {
+			t.Errorf("%v: want G6", v)
+		}
+		got = append(got, v.Rule+": "+v.Msg)
+	}
+	want := []string{
+		"rules/r08-orphan: has no page docs/rules/r08-orphan.md, so nothing proves or publishes it",
+		"retired/x05-orphan: has no page docs/retired/x05-orphan.md, so nothing proves or publishes it",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 

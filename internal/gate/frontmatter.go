@@ -58,6 +58,9 @@ var (
 // silence, and the field it was meant to set would then validate as empty —
 // or, worse, as a valid default.
 func ParsePage(page []byte) (FrontMatter, []byte, error) {
+	// A UTF-8 byte order mark (some Windows editors write one) is not content:
+	// Zensical strips it and reads the front matter behind it, so the gate does.
+	page = bytes.TrimPrefix(page, []byte{0xEF, 0xBB, 0xBF})
 	page = bytes.ReplaceAll(page, []byte("\r\n"), []byte("\n"))
 	if !bytes.HasPrefix(page, openDelim) {
 		return FrontMatter{}, nil, errors.New("page does not start with a --- front matter block")

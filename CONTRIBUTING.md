@@ -41,6 +41,8 @@ run. Both are git-ignored scratch: delete them and build again.
 A rule that expires moves to `docs/retired/` and `retired/`, keeps its ID, and gains
 `status: retired`, `retired_in` and `replaced_by`. Its page URL changes with the
 move; when the first active rule is retired, add a redirect from the old URL.
+If no proof is possible any more (`proof.kind: none`, with a `reason`), delete its
+code instead of moving it: the gate refuses code that nothing proves.
 
 ## Licences
 

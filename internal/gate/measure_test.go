@@ -34,9 +34,31 @@ geomean   5.500Ki                      ?                       ¹ ²
 func TestCheckMeasurement(t *testing.T) {
 	tests := []struct {
 		name   string
+		file   string // the artifact's file name; "" = the one measure.sh writes
 		mutate func(string) string
 		want   string // substring of the one expected problem; "" = clean
 	}{
+		// The file name is measure.sh's account of when and where: it must
+		// agree with the header, or one of them was edited by hand.
+		{
+			name: "file dated another day", file: "2026-10-04-linux-12cpu.txt", mutate: func(s string) string { return s },
+			want: "file name says 2026-10-04, header says 2026-10-03",
+		},
+		{
+			name: "file names another os", file: "2026-10-03-darwin-12cpu.txt", mutate: func(s string) string { return s },
+			want: "file name says darwin, header says linux/amd64",
+		},
+		{
+			name: "file not named by measure.sh", file: "numbers.txt", mutate: func(s string) string { return s },
+			want: "file name is not <date>-<goos>-<N>cpu.txt",
+		},
+		// A renamed or deleted benchmark leaves numbers nothing can reproduce.
+		{name: "benchmark not in the package", mutate: func(s string) string {
+			return strings.ReplaceAll(s, "\nSum", "\nTotal")
+		}, want: "row Total: the package has no BenchmarkTotal"},
+		{name: "sub-benchmark of a benchmark in the package", mutate: func(s string) string {
+			return strings.Replace(s, "\nSum-4 ", "\nSum/n=10-4 ", 1)
+		}},
 		{name: "valid", mutate: func(s string) string { return s }},
 		{name: "missing cpu", mutate: func(s string) string {
 			return strings.Replace(s, "# cpu: AMD Ryzen 5 3600 6-Core Processor\n", "", 1)
@@ -88,7 +110,11 @@ func TestCheckMeasurement(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := checkMeasurement("R01", "rules/r01-x", []byte(tt.mutate(goodMeasurement)))
+			file := tt.file
+			if file == "" {
+				file = "2026-10-03-linux-12cpu.txt"
+			}
+			got := checkMeasurement("R01", "rules/r01-x", file, []byte(tt.mutate(goodMeasurement)), []string{"Sum"})
 			if tt.want == "" {
 				if len(got) != 0 {
 					t.Fatalf("want no problems, got %v", got)

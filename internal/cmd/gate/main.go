@@ -112,11 +112,23 @@ func runCheck(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		fmt.Fprintln(stdout, v)
 	}
 	if n := len(rep.Violations); n > 0 {
-		fmt.Fprintf(stdout, "gate: %d violation(s); %d rule(s) admitted\n", n, len(rep.Admitted))
+		fmt.Fprintf(stdout, "gate: %d violation(s); %s\n", n, admitted(rep.Admitted))
 		return exitViolation
 	}
-	fmt.Fprintf(stdout, "gate: %d rule(s) admitted\n", len(rep.Admitted))
+	fmt.Fprintf(stdout, "gate: %s\n", admitted(rep.Admitted))
 	return exitOK
+}
+
+// admitted totals the admitted entries, the proven apart from the retired ones
+// admitted without a proof: those ran nothing.
+func admitted(as []gate.Admitted) string {
+	proven := 0
+	for _, a := range as {
+		if a.Proven {
+			proven++
+		}
+	}
+	return fmt.Sprintf("%d admitted: %d proven, %d retired without a proof", len(as), proven, len(as)-proven)
 }
 
 func runGen(args []string, stdout, stderr io.Writer) int {

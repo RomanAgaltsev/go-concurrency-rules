@@ -1,9 +1,33 @@
 package gate
 
 import (
+	"context"
+	"errors"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
+
+// TestProveCannotRun: when the go command cannot even start, the gate has
+// learnt nothing about the rule. That is the gate failing (exit 2), never a
+// violation the rule's author is sent to fix (exit 1).
+func TestProveCannotRun(t *testing.T) {
+	rules, _, err := Load("testdata/fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := Prover{Root: "testdata/fixture", Go: filepath.Join(t.TempDir(), "no-such-go")}
+	for _, id := range []string{"R90", "R80", "R84"} { // race, vet, measure
+		t.Run(id, func(t *testing.T) {
+			r := rules[slices.IndexFunc(rules, func(r Rule) bool { return r.ID == id })]
+			vs, _, err := p.Prove(context.Background(), r)
+			if !errors.Is(err, errCannotRun) || len(vs) != 0 {
+				t.Fatalf("Prove = %v, %v; want no violations and errCannotRun", vs, err)
+			}
+		})
+	}
+}
 
 func TestExcerpt(t *testing.T) {
 	// The shape of a -test.timeout panic: the reason first, then pages of stacks.
