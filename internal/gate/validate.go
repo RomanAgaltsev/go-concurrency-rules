@@ -3,6 +3,7 @@ package gate
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"go/build/constraint"
 	"maps"
@@ -279,17 +280,7 @@ func validateTwin(root string, r Rule, bad func(string, ...any)) {
 			bad("%s/%s: %v", r.Dir, f.name, err)
 			continue
 		}
-		in := func(broken bool) bool {
-			return expr.Eval(func(tag string) bool {
-				if tag == "broken" {
-					return broken
-				}
-				// A go1.N term selects a language version. The toolchain running
-				// the gate satisfies it, so it never decides which variant builds.
-				return strings.HasPrefix(tag, "go1.")
-			})
-		}
-		if in(true) != f.withBroken || in(false) == f.withBroken {
+		if inBuild(expr, true) != f.withBroken || inBuild(expr, false) == f.withBroken {
 			want := "//go:build !broken"
 			if f.withBroken {
 				want = "//go:build broken"
@@ -297,7 +288,44 @@ func validateTwin(root string, r Rule, bad func(string, ...any)) {
 			bad("%s/%s: build constraint %q does not select it like %q", r.Dir, f.name, expr.String(), want)
 		}
 	}
+
+	// The proof is one test run against both variants. A test file only one
+	// build sees would fail later as "no tests to run" or a pass count of zero.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		bad("code directory %s: %v", r.Dir, err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		expr, err := buildConstraint(filepath.Join(dir, e.Name()))
+		switch {
+		case errors.Is(err, errNoBuildLine):
+		case err != nil:
+			bad("%s/%s: %v", r.Dir, e.Name(), err)
+		case inBuild(expr, true) != inBuild(expr, false):
+			bad("%s/%s: build constraint %q — a test file must build with both variants", r.Dir, e.Name(), expr.String())
+		}
+	}
 }
+
+// inBuild reports whether a file with build constraint expr is in the build,
+// with or without -tags broken.
+func inBuild(expr constraint.Expr, broken bool) bool {
+	return expr.Eval(func(tag string) bool {
+		if tag == "broken" {
+			return broken
+		}
+		// A go1.N term selects a language version. The toolchain running the
+		// gate satisfies it, so it never decides which variant builds.
+		return strings.HasPrefix(tag, "go1.")
+	})
+}
+
+// errNoBuildLine: the file has no //go:build line before its package clause.
+var errNoBuildLine = errors.New("has no //go:build line")
 
 // buildConstraint returns the //go:build expression of a Go file.
 func buildConstraint(file string) (constraint.Expr, error) {
@@ -315,5 +343,5 @@ func buildConstraint(file string) (constraint.Expr, error) {
 			break // constraints must precede the package clause
 		}
 	}
-	return nil, fmt.Errorf("has no //go:build line")
+	return nil, errNoBuildLine
 }

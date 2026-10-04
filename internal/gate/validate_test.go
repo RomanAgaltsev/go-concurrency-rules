@@ -48,6 +48,13 @@ func writeTwin(t *testing.T, root, dir, brokenTag, fixedTag string) {
 	}
 }
 
+func writeCode(t *testing.T, root, dir, name, src string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(dir), name), []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -152,6 +159,16 @@ func TestValidate(t *testing.T) {
 		{name: "retired twin with a go1.21 term", mutate: func(t *testing.T, root string, r *Rule) {
 			writeTwin(t, root, r.Dir, "//go:build broken && go1.21", "//go:build !broken")
 		}},
+		// The same test runs against both variants: that is the proof's shape.
+		{name: "test file without a tag", mutate: func(t *testing.T, root string, r *Rule) {
+			writeCode(t, root, r.Dir, "rule_test.go", "package r\n")
+		}},
+		{name: "test file only in the broken build", mutate: func(t *testing.T, root string, r *Rule) {
+			writeCode(t, root, r.Dir, "rule_test.go", "//go:build broken\n\npackage r\n")
+		}, want: "rule_test.go: build constraint \"broken\" — a test file must build with both variants"},
+		{name: "benchmark file only in the fixed build", mutate: func(t *testing.T, root string, r *Rule) {
+			writeCode(t, root, r.Dir, "bench_test.go", "//go:build !broken\n\npackage r\n")
+		}, want: "bench_test.go: build constraint \"!broken\""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
