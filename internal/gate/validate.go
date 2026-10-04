@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"go/build/constraint"
+	"io/fs"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -38,6 +40,39 @@ func Validate(root string, rules []Rule) []Violation {
 		vs = append(vs, validateRule(root, r, known)...)
 	}
 	return vs
+}
+
+// CheckCodeDirs refuses (G6) every code directory under rules/ or retired/
+// without a page of the same name: nothing proves it and nothing publishes it.
+// A renamed or deleted page leaves one behind. Violations are keyed by the
+// directory's path.
+func CheckCodeDirs(root string) ([]Violation, error) {
+	var vs []Violation
+	for _, c := range collections {
+		entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(c.code)))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			page := path.Join(c.docs, e.Name()+".md")
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(page))); errors.Is(err, fs.ErrNotExist) {
+				vs = append(vs, Violation{
+					Rule: path.Join(c.code, e.Name()),
+					Gate: "G6",
+					Msg:  fmt.Sprintf("has no page %s, so nothing proves or publishes it", page),
+				})
+			} else if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return vs, nil
 }
 
 // countIDs maps each ID to the number of pages that declare it. A rule is

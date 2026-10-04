@@ -85,6 +85,8 @@ func TestCheckFixture(t *testing.T) {
 		{id: "X91"},
 		// G2 covers every page on the site, not only rule pages.
 		{id: "docs/guide.md", want: []string{"G2: hand-typed Go"}},
+		// So does G6's other side: code with no page is refused by its path.
+		{id: "rules/r75-orphan", want: []string{"G6: has no page docs/rules/r75-orphan.md"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {

@@ -90,13 +90,19 @@ func Check(ctx context.Context, opt Options) (Report, error) {
 		}
 		rep.Violations = append(rep.Violations, own...)
 	}
-	// Every other page on the site, unless the run was narrowed to some rules.
+	// Every other page on the site, and every code directory without a page,
+	// unless the run was narrowed to some rules.
 	if len(opt.IDs) == 0 {
 		site, err := CheckSitePages(opt.Root, rules)
 		if err != nil {
 			return Report{}, err
 		}
+		orphans, err := CheckCodeDirs(opt.Root)
+		if err != nil {
+			return Report{}, err
+		}
 		rep.Violations = append(rep.Violations, site...)
+		rep.Violations = append(rep.Violations, orphans...)
 	}
 	return rep, nil
 }
