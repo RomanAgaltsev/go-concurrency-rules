@@ -110,7 +110,7 @@ $ go test -race ./rules/r09-acquire-locks-in-one-global-order/
 ok  	…/rules/r09-acquire-locks-in-one-global-order
 $ go test -race -tags broken ./rules/r09-acquire-locks-in-one-global-order/
 --- FAIL: TestOpposingTransfers
-    rule_test.go:52: watchdog: deadlock — Transfer(a, b) and Transfer(b, a) each hold the lock the other needs
+    rule_test.go:55: watchdog: deadlock — Transfer(a, b) and Transfer(b, a) each hold the lock the other needs
 ```
 
 With the global order, the second `Transfer` waits for the first lock, never reaches

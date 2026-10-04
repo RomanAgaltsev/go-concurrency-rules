@@ -15,6 +15,9 @@ func TestOpposingTransfers(t *testing.T) {
 	// Hold each Transfer after its first lock until both have one. With one
 	// global order the second Transfer queues on the first lock and never
 	// arrives, so the barrier gives up after 100ms and lets the first finish.
+	// 100ms is a trade: the fixed variant waits it out on every run, while a
+	// shorter wait could expire before a late-scheduled second Transfer takes
+	// its first lock — and the broken variant would then finish, not deadlock.
 	var (
 		mu      sync.Mutex
 		arrived int
