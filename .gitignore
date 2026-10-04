@@ -1,2 +1,4 @@
 /bin/
 /site/
+# Zensical's build cache
+/.cache/

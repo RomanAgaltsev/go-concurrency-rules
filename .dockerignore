@@ -1,0 +1,4 @@
+# The docs image needs only requirements-docs.txt (bind-mounted at build time);
+# send nothing else to the builder.
+*
+!requirements-docs.txt

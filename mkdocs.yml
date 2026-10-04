@@ -1,0 +1,50 @@
+# Built by Zensical (pinned in requirements-docs.txt). Kept in mkdocs.yml form,
+# not zensical.toml, on purpose: ProperDocs + MaterialX read this same file, so
+# the site has a fallback if Zensical stalls before 1.0 (spec D4).
+# Always build with --strict: without it a broken link is a warning and the
+# build exits 0 (spec probe P18).
+site_name: Go concurrency rules
+site_description: Golden rules for concurrent Go — each with broken and fixed code and a test that proves it
+site_url: https://romanagaltsev.github.io/go-concurrency-rules/
+repo_url: https://github.com/RomanAgaltsev/go-concurrency-rules
+edit_uri: edit/main/docs/
+docs_dir: docs
+
+theme:
+  name: material
+  features:
+    - content.code.annotate
+    - content.code.copy
+    - content.tabs.link
+    - navigation.sections
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences
+  # Every Go block on the site is a snippet from the repository (gate G2).
+  # check_paths makes a missing file or section fail the build.
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true
+
+nav:
+  - Home: index.md
+  - How to read a rule: how-to-read-a-rule.md
+  - Rules by group:
+      - Ownership & lifetime: groups/ownership.md
+      - Shared memory: groups/shared-memory.md
+      - Coordination: groups/coordination.md
+      - Time: groups/time.md
+      - Testing: groups/testing.md
+      - Measurement: groups/measurement.md
+  - Rules by activity:
+      - Reading: activity/read.md
+      - Writing: activity/write.md
+      - Refactoring: activity/refactor.md
+      - Testing: activity/test.md
+      - Profiling: activity/profile.md
+  - Retired rules: retired/index.md

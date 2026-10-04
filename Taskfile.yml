@@ -11,6 +11,14 @@ vars:
     -v gcr-modcache:/go/pkg/mod
     -v gcr-buildcache:/root/.cache/go-build
     -w /src {{.GO_IMAGE}}
+  # The site builder (docs.Dockerfile): Zensical for a host without Python.
+  DOCS_IMAGE: "gcr-docs:local"
+  DOCS_RUN: >-
+    docker run --rm
+    -v "{{.ROOT_DIR | replace "\\" "/"}}:/site"
+  # The gate as a host binary — built, never `go run`, which turns every
+  # non-zero exit into 1.
+  GATE: "bin/gate{{exeExt}}"
 
 tasks:
   test:
@@ -31,6 +39,12 @@ tasks:
     cmds:
       - golangci-lint run
 
+  lint:actions:
+    desc: actionlint over .github/workflows, in a container
+    cmds:
+      # Workflows otherwise meet their first real check on GitHub, after the push.
+      - docker run --rm -v "{{.ROOT_DIR | replace "\\" "/"}}:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+
   gate:
     desc: The admission gate over every rule, in the golang container (needs -race)
     cmds:
@@ -47,9 +61,74 @@ tasks:
       # artifact this host produces. Run it on an otherwise idle machine.
       - "{{.DOCKER_RUN}} sh scripts/measure.sh {{.CLI_ARGS}}"
 
+  gate:build:
+    internal: true
+    cmds:
+      - go build -o {{.GATE}} ./internal/cmd/gate
+
+  gen:
+    desc: Regenerate the site's index pages from the rules' front matter
+    deps: [gate:build]
+    cmds:
+      - "{{.GATE}} gen"
+
+  gen:check:
+    desc: Fail if a generated index page is stale (what CI runs)
+    deps: [gate:build]
+    cmds:
+      - "{{.GATE}} gen -check"
+
+  rule:
+    desc: Run one rule both ways and explain what happened, e.g. task rule -- R07
+    deps: [gate:build]
+    cmds:
+      # On the host, so it degrades honestly: without a C compiler, race rules
+      # print the container command instead of a verdict.
+      - "{{.GATE}} run {{.CLI_ARGS}}"
+
+  docs:build:
+    desc: Build the site strictly with the Zensical installed here (pip install -r requirements-docs.txt)
+    cmds:
+      # --strict: without it a broken link is only a warning (spec probe P18).
+      - zensical build --strict
+
+  docs:serve:
+    desc: Serve the site with live reload, with the Zensical installed here
+    cmds:
+      - zensical serve
+
+  docs:image:
+    desc: Build the site builder image (Zensical, pinned) for hosts without Python
+    cmds:
+      - docker build -q -f docs.Dockerfile -t {{.DOCS_IMAGE}} .
+
+  docs:build:docker:
+    desc: Build the site strictly in a container — no Python needed
+    deps: [docs:image]
+    cmds:
+      # The image runs as uid 1001. On Windows (Docker Desktop) that can write
+      # the bind mount; on Linux and macOS the repository belongs to you, so
+      # run as you, or the build cannot create site/.
+      - cmd: "{{.DOCS_RUN}} {{.DOCS_IMAGE}}"
+        platforms: [windows]
+      - cmd: '{{.DOCS_RUN}} --user "$(id -u):$(id -g)" {{.DOCS_IMAGE}}'
+        platforms: [linux, darwin]
+
+  docs:serve:docker:
+    desc: Serve the site at http://127.0.0.1:8000 with live reload
+    deps: [docs:image]
+    cmds:
+      - cmd: "{{.DOCS_RUN}} -p 127.0.0.1:8000:8000 {{.DOCS_IMAGE}} serve -a 0.0.0.0:8000"
+        platforms: [windows]
+      - cmd: '{{.DOCS_RUN}} --user "$(id -u):$(id -g)" -p 127.0.0.1:8000:8000 {{.DOCS_IMAGE}} serve -a 0.0.0.0:8000'
+        platforms: [linux, darwin]
+
   ci:
-    desc: What CI runs, from this machine
+    desc: What CI runs, from this machine (needs Docker)
     cmds:
       - task: lint
+      - task: lint:actions
+      - task: gen:check
       - task: test:docker
       - task: gate
+      - task: docs:build:docker
