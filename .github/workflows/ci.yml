@@ -24,6 +24,8 @@ jobs:
         with:
           # Must be built with Go >= the go directive, or it refuses the config.
           version: v2.14.0
+      - name: Workflows are valid (actionlint)
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
   test:
     runs-on: ubuntu-latest
@@ -51,6 +53,8 @@ jobs:
           go-version: '1.27'
       # Built, not `go run`: go run turns every non-zero exit into 1.
       - run: go build -o bin/gate ./internal/cmd/gate
+      - name: Generated index pages are up to date
+        run: bin/gate gen -check
       - run: bin/gate check
 
   govulncheck:
