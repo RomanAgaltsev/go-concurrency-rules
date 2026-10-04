@@ -25,6 +25,9 @@ type Options struct {
 type Admitted struct {
 	ID      string
 	Summary string // what the proof ran, in one line
+	// Proven is false for a retired entry admitted with proof kind none:
+	// nothing was run, and a total must not count it as a proof.
+	Proven bool
 }
 
 // Report is the outcome of a gate run.
@@ -86,7 +89,7 @@ func Check(ctx context.Context, opt Options) (Report, error) {
 		}
 		own = append(own, pvs...)
 		if len(own) == 0 {
-			rep.Admitted = append(rep.Admitted, Admitted{ID: r.ID, Summary: summary})
+			rep.Admitted = append(rep.Admitted, Admitted{ID: r.ID, Summary: summary, Proven: r.Proof.Kind != "none"})
 		}
 		rep.Violations = append(rep.Violations, own...)
 	}

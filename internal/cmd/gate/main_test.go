@@ -56,15 +56,40 @@ func TestRunFixture(t *testing.T) {
 		t.Skipf("needs -race; run `task test:docker`: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	code := run(context.Background(), []string{"check", "-root", "../../gate/testdata/fixture", "R90", "R91"}, &stdout, &stderr)
+	code := run(context.Background(), []string{"check", "-root", "../../gate/testdata/fixture", "R90", "R91", "X90"}, &stdout, &stderr)
 	if code != exitViolation {
 		t.Fatalf("exit code = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitViolation, &stdout, &stderr)
 	}
 	out := stdout.String()
-	for _, want := range []string{"R90 ok  race: fixed passed 10×", "R91 G1: broken variant failed", "gate: 1 violation(s); 1 rule(s) admitted"} {
+	for _, want := range []string{"R90 ok  race: fixed passed 10×", "R91 G1: broken variant failed", "X90 ok  none: no proof", "gate: 1 violation(s); 2 admitted: 1 proven, 1 retired without a proof"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("stdout lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// TestAdmitted: an entry admitted without a proof is counted apart from the
+// proven ones — "9 admitted" must not read as nine proofs when three are
+// retired entries with nothing to run.
+func TestAdmitted(t *testing.T) {
+	tests := []struct {
+		name string
+		as   []gate.Admitted
+		want string
+	}{
+		{name: "none", as: nil, want: "0 admitted: 0 proven, 0 retired without a proof"},
+		{
+			name: "mixed",
+			as:   []gate.Admitted{{ID: "R07", Proven: true}, {ID: "X02"}, {ID: "R12", Proven: true}},
+			want: "3 admitted: 2 proven, 1 retired without a proof",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := admitted(tt.as); got != tt.want {
+				t.Errorf("admitted() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
