@@ -46,6 +46,7 @@ func Explain(ctx context.Context, opt Options, id string, race bool, w io.Writer
 	p.Root = opt.Root
 
 	fmt.Fprintf(w, "%s — %s\n  %s\n\n", r.ID, r.Title, r.Statement)
+	var ok bool
 	switch r.Proof.Kind {
 	case "race":
 		if !race {
@@ -54,22 +55,28 @@ func Explain(ctx context.Context, opt Options, id string, race bool, w io.Writer
 				dockerGateCmd("run "+r.ID))
 			return false, ErrNeedsRace
 		}
-		return p.explainTest(ctx, r, true, w), nil
+		ok = p.explainTest(ctx, r, true, w)
 	case "test":
 		if !race {
 			fmt.Fprint(w, "(without -race: this host has no C compiler, and this rule's proof does not need it)\n\n")
 		}
-		return p.explainTest(ctx, r, race, w), nil
+		ok = p.explainTest(ctx, r, race, w)
 	case "vet":
-		return p.explainVet(ctx, r, w), nil
+		ok = p.explainVet(ctx, r, w)
 	case "measure":
-		return p.explainMeasure(ctx, r, race, w), nil
+		ok = p.explainMeasure(ctx, r, race, w)
 	case "none":
 		fmt.Fprintf(w, "No proof: %s\n", r.Proof.Reason)
 		return true, nil
 	default:
 		return false, fmt.Errorf("proof kind %q has no explanation", r.Proof.Kind)
 	}
+	// A process killed by cancellation says nothing about the rule: report the
+	// interruption, not the verdict it would otherwise read as (as Check does).
+	if err := ctx.Err(); err != nil {
+		return false, fmt.Errorf("interrupted while running %s: %w", r.ID, err)
+	}
+	return ok, nil
 }
 
 // testArgs builds `go test` for one variant's proof test.

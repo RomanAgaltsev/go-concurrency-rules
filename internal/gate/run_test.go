@@ -58,3 +58,14 @@ func TestExplainUnknownID(t *testing.T) {
 		t.Fatalf("err = %v, want it to name the missing id", err)
 	}
 }
+
+// TestExplainInterrupted: a process killed by cancellation says nothing about
+// the rule. Explain must report the interruption, not a verdict.
+func TestExplainInterrupted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ok, err := Explain(ctx, Options{Root: "testdata/fixture"}, "R91", false, &bytes.Buffer{})
+	if ok || !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "interrupted while running R91") {
+		t.Fatalf("ok = %v, err = %v; want an interruption while running R91", ok, err)
+	}
+}
