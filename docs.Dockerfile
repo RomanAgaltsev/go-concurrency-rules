@@ -4,7 +4,7 @@
 # without Python. `task docs:build` and `task docs:serve` run it with the
 # repository mounted at /site. CI does not use this image — it installs the
 # same requirements-docs.txt with actions/setup-python.
-FROM python:3.13.16-slim AS docs
+FROM python:3.14.8-slim AS docs
 
 LABEL org.opencontainers.image.source="https://github.com/RomanAgaltsev/go-concurrency-rules" \
       org.opencontainers.image.description="Zensical, pinned, for building the go-concurrency-rules site"
