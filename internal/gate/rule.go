@@ -1,7 +1,9 @@
 package gate
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -54,19 +56,25 @@ func Load(root string) ([]Rule, []Violation, error) {
 		vs    []Violation
 	)
 	for _, c := range collections {
-		pages, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(c.docs), "*.md"))
+		// ReadDir, not Glob: a "[" in root would be a pattern to Glob, which
+		// would then match nothing and report a repository of rules as empty.
+		dir := filepath.Join(root, filepath.FromSlash(c.docs))
+		entries, err := os.ReadDir(dir)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue // a collection with no pages yet
+		}
 		if err != nil {
 			return nil, nil, err
 		}
-		for _, p := range pages {
-			name := filepath.Base(p)
-			if name == "index.md" {
+		for _, e := range entries {
+			name := e.Name()
+			if e.IsDir() || filepath.Ext(name) != ".md" || name == "index.md" {
 				continue
 			}
 			slug := strings.TrimSuffix(name, ".md")
 			rel := path.Join(c.docs, name)
 
-			data, err := os.ReadFile(p)
+			data, err := os.ReadFile(filepath.Join(dir, name))
 			if err != nil {
 				return nil, nil, err
 			}
