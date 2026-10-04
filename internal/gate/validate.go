@@ -102,8 +102,15 @@ func validateRule(root string, r Rule, known map[string]int) []Violation {
 			bad("source %q is not an https URL", s)
 		}
 	}
-	if r.Proof.Kind != "none" { // an entry without a proof has no twin to check
+	switch {
+	case r.Proof.Kind != "none":
 		validateTwin(root, r, bad)
+	case r.Status == "retired":
+		// An entry without a proof has no twin. Code under its name would sit in
+		// the repository looking like a proof that nothing runs.
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(r.Dir))); err == nil {
+			bad("kind none, but code directory %s exists: nothing proves it — give the entry a proof or delete the directory", r.Dir)
+		}
 	}
 	return vs
 }

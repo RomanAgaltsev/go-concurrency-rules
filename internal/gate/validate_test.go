@@ -142,6 +142,18 @@ func TestValidate(t *testing.T) {
 			r.Status, r.RetiredIn, r.ReplacedBy = "retired", "go1.23", "nothing"
 			r.Proof = Proof{Kind: "none"}
 		}, want: "proof.reason is empty"},
+		{name: "retired without a proof", mutate: func(_ *testing.T, _ string, r *Rule) {
+			r.ID, r.Slug, r.Page, r.Dir = "X02", "x02-gone", "docs/retired/x02-gone.md", "retired/x02-gone"
+			r.Status, r.RetiredIn, r.ReplacedBy = "retired", "go1.23", "nothing"
+			r.Proof = Proof{Kind: "none", Reason: "the old behaviour cannot be selected"}
+		}},
+		// Code nothing proves would sit in the repository looking like a proof.
+		{name: "retired without a proof, but with code", mutate: func(t *testing.T, root string, r *Rule) {
+			r.ID, r.Slug, r.Page, r.Dir = "X02", "x02-gone", "docs/retired/x02-gone.md", "retired/x02-gone"
+			r.Status, r.RetiredIn, r.ReplacedBy = "retired", "go1.23", "nothing"
+			r.Proof = Proof{Kind: "none", Reason: "the old behaviour cannot be selected"}
+			writeTwin(t, root, r.Dir, "//go:build broken", "//go:build !broken")
+		}, want: "kind none, but code directory retired/x02-gone exists"},
 		{name: "none on an active rule", mutate: func(_ *testing.T, _ string, r *Rule) {
 			r.Proof = Proof{Kind: "none", Reason: "too hard"}
 		}, want: "kind none is only for retired entries"},
