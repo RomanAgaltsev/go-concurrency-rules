@@ -1,0 +1,16 @@
+{
+  // One click to a working checkout: Go 1.27 with a C compiler (so -race works),
+  // Python for the site, and the tools the Taskfile calls at CI's versions.
+  "name": "go-concurrency-rules",
+  "image": "mcr.microsoft.com/devcontainers/go:2.3.1-1.27-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/python:1": { "version": "3.13" }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "forwardPorts": [8000],
+  "portsAttributes": { "8000": { "label": "site (task docs:serve)" } },
+  "customizations": {
+    "vscode": { "extensions": ["golang.go"] },
+    "codespaces": { "openFiles": ["README.md"] }
+  }
+}
