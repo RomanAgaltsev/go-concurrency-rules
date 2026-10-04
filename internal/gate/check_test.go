@@ -83,6 +83,8 @@ func TestCheckFixture(t *testing.T) {
 		// Retired entries: one without a proof, one proven by a go1.21 file.
 		{id: "X90"},
 		{id: "X91"},
+		// G2 covers every page on the site, not only rule pages.
+		{id: "docs/guide.md", want: []string{"G2: hand-typed Go"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {

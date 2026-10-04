@@ -90,13 +90,24 @@ func Check(ctx context.Context, opt Options) (Report, error) {
 		}
 		rep.Violations = append(rep.Violations, own...)
 	}
+	// Every other page on the site, unless the run was narrowed to some rules.
+	if len(opt.IDs) == 0 {
+		site, err := CheckSitePages(opt.Root, rules)
+		if err != nil {
+			return Report{}, err
+		}
+		rep.Violations = append(rep.Violations, site...)
+	}
 	return rep, nil
 }
 
-// dockerGate is the gate run in the golang container, for a reader without
-// Task. exec makes the gate the process that receives Ctrl-C.
-const dockerGate = `docker run --rm --init -v "$PWD:/src" -w /src golang:1.27 ` +
-	`sh -c 'go build -o /tmp/gate ./internal/cmd/gate && exec /tmp/gate check'`
+// dockerGateCmd is the gate run in the golang container with the given
+// subcommand, for a reader without Task. exec makes the gate the process that
+// receives Ctrl-C.
+func dockerGateCmd(subcommand string) string {
+	return `docker run --rm --init -v "$PWD:/src" -w /src golang:1.27 ` +
+		`sh -c 'go build -o /tmp/gate ./internal/cmd/gate && exec /tmp/gate ` + subcommand + `'`
+}
 
 // RaceAvailable reports whether this host can build with -race.
 //
@@ -126,7 +137,7 @@ func RaceAvailable(ctx context.Context, goBin string) error {
 		}
 		return fmt.Errorf("this host cannot build with -race, which needs cgo and a C compiler:\n%s\n"+
 			"run the gate in a container instead, from the repository root — `task gate`, or:\n    %s",
-			tail(out, 5), dockerGate)
+			tail(out, 5), dockerGateCmd("check"))
 	}
 	return nil
 }

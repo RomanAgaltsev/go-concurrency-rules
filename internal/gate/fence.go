@@ -3,6 +3,7 @@ package gate
 import (
 	"bytes"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -71,6 +72,41 @@ func CheckPage(root string, r Rule) []Violation {
 		bad(fenceLine, "code block is never closed")
 	}
 	return vs
+}
+
+// CheckSitePages enforces G2 on every page under docs/ that is not a rule page
+// — the home page, guides, generated indexes. The site's promise is that none
+// of its Go is hand-typed, and that is a promise about every page. Violations
+// are reported under the page's path.
+func CheckSitePages(root string, rules []Rule) ([]Violation, error) {
+	isRule := map[string]bool{}
+	for _, r := range rules {
+		isRule[r.Page] = true
+	}
+	// Walk through an os.Root: every read stays inside the repository, even
+	// past a symlink planted in docs/.
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = r.Close() }() // read-only: a failed close loses nothing
+	fsys := r.FS()
+	var vs []Violation
+	err = fs.WalkDir(fsys, "docs", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || path.Ext(p) != ".md" {
+			return err
+		}
+		if isRule[p] {
+			return nil // checked with its rule, under its ID
+		}
+		data, err := fs.ReadFile(fsys, p)
+		if err != nil {
+			return err
+		}
+		vs = append(vs, CheckPage(root, Rule{ID: p, Page: p, Body: data})...)
+		return nil
+	})
+	return vs, err
 }
 
 // fenceLang returns the language of a fence info string: ```go, ``` go,
