@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -29,6 +30,10 @@ var (
 	samplesRe   = regexp.MustCompile(`\bn=(\d+)(?:\+(\d+))?\)`)
 	dateRe      = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	pkgRe       = regexp.MustCompile(`(?m)^pkg: (\S+)\s*$`)
+	// measure.sh names an artifact <date>-<goos>-<nproc>cpu.txt.
+	fileRe      = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})-([a-z0-9]+)-\d+cpu\.txt$`)
+	benchFuncRe = regexp.MustCompile(`(?m)^func Benchmark(\w+)\(`)
+	procsRe     = regexp.MustCompile(`-\d+$`) // benchstat's -GOMAXPROCS suffix
 )
 
 // proveMeasure proves a measure rule. Its claim is about cost, so nothing is
@@ -86,6 +91,10 @@ func checkMeasurements(root string, r Rule) (int, []string, error) {
 	if err != nil {
 		return 0, nil, fmt.Errorf("%w: %w", errCannotRun, err)
 	}
+	benches, err := benchmarks(filepath.Join(root, filepath.FromSlash(r.Dir)))
+	if err != nil {
+		return 0, nil, fmt.Errorf("%w: %w", errCannotRun, err)
+	}
 	var problems []string
 	n := 0
 	for _, e := range entries {
@@ -97,7 +106,7 @@ func checkMeasurements(root string, r Rule) (int, []string, error) {
 		if err != nil {
 			return 0, nil, fmt.Errorf("%w: %w", errCannotRun, err)
 		}
-		for _, msg := range checkMeasurement(r.ID, r.Dir, data) {
+		for _, msg := range checkMeasurement(r.ID, r.Dir, e.Name(), data, benches) {
 			problems = append(problems, fmt.Sprintf("measurement %s: %s", e.Name(), msg))
 		}
 	}
@@ -107,9 +116,33 @@ func checkMeasurements(root string, r Rule) (int, []string, error) {
 	return n, problems, nil
 }
 
-// checkMeasurement checks one artifact: a "# key: value" header naming the
-// regime, then benchstat output comparing broken with fixed.
-func checkMeasurement(id, dir string, data []byte) []string {
+// benchmarks returns the names, without the Benchmark prefix, of the benchmark
+// functions in a package directory's test files.
+func benchmarks(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		for _, m := range benchFuncRe.FindAllSubmatch(data, -1) {
+			names = append(names, string(m[1]))
+		}
+	}
+	return names, nil
+}
+
+// checkMeasurement checks one artifact, named name: a "# key: value" header
+// naming the regime, then benchstat output comparing broken with fixed, whose
+// rows must name benchmarks the package still has (benches).
+func checkMeasurement(id, dir, name string, data []byte, benches []string) []string {
 	header := map[string]string{}
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {
@@ -133,6 +166,18 @@ func checkMeasurement(id, dir string, data []byte) []string {
 	if v := header["date"]; v != "" && !dateRe.MatchString(v) {
 		problems = append(problems, fmt.Sprintf("header date %q is not YYYY-MM-DD", v))
 	}
+	// The file name is measure.sh's own record of when and where it measured:
+	// disagreeing with the header means one of the two was edited by hand.
+	if m := fileRe.FindStringSubmatch(name); m == nil {
+		problems = append(problems, "file name is not <date>-<goos>-<N>cpu.txt, as scripts/measure.sh names it")
+	} else {
+		if v := header["date"]; dateRe.MatchString(v) && v != m[1] {
+			problems = append(problems, fmt.Sprintf("file name says %s, header says %s", m[1], v))
+		}
+		if v := header["os"]; v != "" && !strings.HasPrefix(v, m[2]+"/") {
+			problems = append(problems, fmt.Sprintf("file name says %s, header says %s", m[2], v))
+		}
+	}
 	// benchstat copies go test's "pkg:" line into its output: a witness the
 	// header cannot fake. An artifact copied from another rule, header edited,
 	// still names the package it measured.
@@ -144,9 +189,20 @@ func checkMeasurement(id, dir string, data []byte) []string {
 	if !bytes.Contains(data, []byte("vs base")) {
 		problems = append(problems, "no benchstat comparison (benchstat broken.txt fixed.txt)")
 	}
-	counts, oneSided := scanComparisons(data)
+	counts, rows, oneSided := scanComparisons(data)
 	for _, name := range oneSided {
 		problems = append(problems, fmt.Sprintf("row %q has no comparison (p=… n=…): it was measured on one side only", name))
+	}
+	// A renamed or deleted benchmark leaves numbers nothing can reproduce. A
+	// row is Name, Name-P (GOMAXPROCS P) or Name/sub…-P.
+	seen := map[string]bool{}
+	for _, row := range rows {
+		bench, _, _ := strings.Cut(row, "/")
+		bench = procsRe.ReplaceAllString(bench, "")
+		if !seen[bench] && !slices.Contains(benches, bench) {
+			problems = append(problems, fmt.Sprintf("row %s: the package has no Benchmark%s — re-measure, or restore the benchmark", bench, bench))
+		}
+		seen[bench] = true
 	}
 	if bytes.Contains(data, []byte("vs base")) && len(counts) == 0 && len(oneSided) == 0 {
 		problems = append(problems, "no sample counts (n=…) in the comparison")
@@ -162,11 +218,11 @@ func checkMeasurement(id, dir string, data []byte) []string {
 
 // scanComparisons walks benchstat's comparison tables — each starts at its
 // "vs base" header and ends at a blank line — and returns the sample count
-// each data row rests on, plus the names of rows that carry no comparison.
-// benchstat prints n=10 when both sides have 10 samples and n=10+2 when they
-// differ, so the smaller side is the count; a benchmark measured on one side
-// only prints no (p=… n=…) at all.
-func scanComparisons(data []byte) (counts []int, oneSided []string) {
+// each compared row rests on and the row's name, plus the names of rows that
+// carry no comparison. benchstat prints n=10 when both sides have 10 samples
+// and n=10+2 when they differ, so the smaller side is the count; a benchmark
+// measured on one side only prints no (p=… n=…) at all.
+func scanComparisons(data []byte) (counts []int, rows, oneSided []string) {
 	inTable := false
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	for sc.Scan() {
@@ -193,8 +249,9 @@ func scanComparisons(data []byte) (counts []int, oneSided []string) {
 			}
 		}
 		counts = append(counts, n)
+		rows = append(rows, strings.Fields(line)[0])
 	}
-	return counts, oneSided
+	return counts, rows, oneSided
 }
 
 // isFootnote reports whether a line is one of benchstat's footnotes, which
