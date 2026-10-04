@@ -84,6 +84,26 @@ func TestGenerate(t *testing.T) {
 	}
 }
 
+// TestGenerateTitles: every group and activity the front matter may name has a
+// page title. A value added to validate.go without one would publish a page
+// headed by a bare "# ".
+func TestGenerateTitles(t *testing.T) {
+	for _, g := range groups {
+		if groupTitles[g] == "" {
+			t.Errorf("group %q has no title in groupTitles", g)
+		}
+	}
+	for _, tag := range tags {
+		if tagTitles[tag] == "" {
+			t.Errorf("tag %q has no title in tagTitles", tag)
+		}
+	}
+	// And no title outlives its value.
+	if len(groupTitles) != len(groups) || len(tagTitles) != len(tags) {
+		t.Errorf("titles for %d groups and %d tags, want %d and %d", len(groupTitles), len(tagTitles), len(groups), len(tags))
+	}
+}
+
 func TestStaleGenerated(t *testing.T) {
 	root := t.TempDir()
 	files := Generate(genRules())
