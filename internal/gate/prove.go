@@ -32,9 +32,28 @@ type Prover struct {
 	Timeout time.Duration
 }
 
+// errCannotRun means a process the proof needed never ran: the go command or
+// a test binary could not start, or a file the gate needed could not be read.
+// That says nothing about the rule — the gate failed, not the proof — so it is
+// an error (exit 2), never a violation sent to the rule's author (exit 1).
+var errCannotRun = errors.New("the gate could not run the proof")
+
+// cannotRun returns err wrapped in errCannotRun when the process never ran. A
+// process that ran and exited non-zero is the rule's doing: nil.
+func cannotRun(err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, exited := errors.AsType[*exec.ExitError](err); exited {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", errCannotRun, err)
+}
+
 // Prove runs r's proof (G1) and returns its violations and, when it held, a
-// one-line account of what was run.
-func (p Prover) Prove(ctx context.Context, r Rule) ([]Violation, string) {
+// one-line account of what was run. The error is the gate's own failure
+// (errCannotRun): no verdict either way.
+func (p Prover) Prove(ctx context.Context, r Rule) ([]Violation, string, error) {
 	switch r.Proof.Kind {
 	case "race", "test":
 		return p.proveTest(ctx, r)
@@ -45,9 +64,9 @@ func (p Prover) Prove(ctx context.Context, r Rule) ([]Violation, string) {
 	case "none":
 		// Nothing to run, and the summary says so: an entry admitted without
 		// a proof must not read like one admitted with one.
-		return nil, "none: no proof — " + r.Proof.Reason
+		return nil, "none: no proof — " + r.Proof.Reason, nil
 	default:
-		return []Violation{{Rule: r.ID, Gate: "G1", Msg: fmt.Sprintf("proof kind %q has no prover", r.Proof.Kind)}}, ""
+		return []Violation{{Rule: r.ID, Gate: "G1", Msg: fmt.Sprintf("proof kind %q has no prover", r.Proof.Kind)}}, "", nil
 	}
 }
 
@@ -59,7 +78,7 @@ func (p Prover) Prove(ctx context.Context, r Rule) ([]Violation, string) {
 // process: twenty iterations of a racy test in one process produced two
 // reports. And the signature, because a broken variant that does not compile
 // exits 1 exactly like one whose test fails.
-func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
+func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string, error) {
 	bad := func(format string, args ...any) []Violation {
 		return []Violation{{Rule: r.ID, Gate: "G1", Msg: fmt.Sprintf(format, args...)}}
 	}
@@ -67,21 +86,21 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 	pkg := "./" + r.Dir
 	timeout := p.timeout()
 
-	out, vs := p.passes(ctx, r, "fixed", pr.Runs)
-	if vs != nil {
-		return vs, ""
+	out, vs, err := p.passes(ctx, r, "fixed", pr.Runs)
+	if vs != nil || err != nil {
+		return vs, "", err
 	}
 	// A signature the fixed run prints as well cannot tell broken from fixed.
 	for _, s := range pr.Signature {
 		if bytes.Contains(out, []byte(s)) {
-			return bad("signature %q also appears in the fixed variant's output, so it cannot tell broken from fixed", s), ""
+			return bad("signature %q also appears in the fixed variant's output, so it cannot tell broken from fixed", s), "", nil
 		}
 	}
 
 	// The broken variant: build once, run N separate processes.
 	tmp, err := os.MkdirTemp("", "gate-"+r.Slug+"-")
 	if err != nil {
-		return bad("cannot create a temp dir: %v", err), ""
+		return nil, "", fmt.Errorf("%w: %w", errCannotRun, err)
 	}
 	defer os.RemoveAll(tmp)
 	bin := filepath.Join(tmp, "broken.test")
@@ -89,17 +108,22 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 		bin += ".exe"
 	}
 	if out, err := p.goCmd(ctx, timeout, "test", "-race", "-tags", "broken", "-c", "-o", bin, pkg); err != nil {
-		return bad("broken variant does not build:\n%s", tail(out, 20)), ""
+		if err := cannotRun(err); err != nil {
+			return nil, "", err
+		}
+		return bad("broken variant does not build:\n%s", tail(out, 20)), "", nil
 	}
 
 	results := p.runBroken(ctx, bin, r)
-	var withSig, passed, unsigned, timedOut, notRun int
+	var withSig, passed, unsigned, timedOut int
 	var first *runResult // the first run that does not count towards N/N
 	for i := range results {
 		res := &results[i]
 		switch {
 		case res.startErr != nil:
-			notRun++
+			// The binary this prover just built did not start: the gate's
+			// failure, and it says nothing about the other runs either.
+			return nil, "", fmt.Errorf("%w: %w", errCannotRun, res.startErr)
 		case !res.failed:
 			passed++
 		case res.timedOut:
@@ -115,11 +139,9 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 		}
 	}
 	if first != nil {
-		msg := fmt.Sprintf("broken variant failed with the signature in %d/%d runs (%d passed, %d failed without it, %d timed out, %d did not start)",
-			withSig, pr.Runs, passed, unsigned, timedOut, notRun)
+		msg := fmt.Sprintf("broken variant failed with the signature in %d/%d runs (%d passed, %d failed without it, %d timed out)",
+			withSig, pr.Runs, passed, unsigned, timedOut)
 		switch {
-		case first.startErr != nil:
-			msg += fmt.Sprintf("; first run did not start: %v", first.startErr)
 		case first.timedOut:
 			msg += fmt.Sprintf("; a hang is never a proof — make the broken variant fail fast (a watchdog). First run:\n%s", excerpt(first.out))
 		case first.failed:
@@ -127,10 +149,10 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 		default:
 			msg += fmt.Sprintf("; first passing run:\n%s", tail(first.out, 20))
 		}
-		return bad("%s", msg), ""
+		return bad("%s", msg), "", nil
 	}
 	return nil, fmt.Sprintf("%s: fixed passed %d×; broken failed %d/%d separate runs with the signature",
-		pr.Kind, pr.Runs, withSig, pr.Runs)
+		pr.Kind, pr.Runs, withSig, pr.Runs), nil
 }
 
 // passes runs the proof test of one variant n times in one process, under
@@ -138,7 +160,7 @@ func (p Prover) proveTest(ctx context.Context, r Rule) ([]Violation, string) {
 // pattern that matches nothing also exits 0. One process timeout covers all n:
 // a variant that hangs must be stopped in minutes, with its reason, not after
 // n times as long.
-func (p Prover) passes(ctx context.Context, r Rule, variant string, n int) ([]byte, []Violation) {
+func (p Prover) passes(ctx context.Context, r Rule, variant string, n int) ([]byte, []Violation, error) {
 	bad := func(format string, args ...any) []Violation {
 		return []Violation{{Rule: r.ID, Gate: "G1", Msg: fmt.Sprintf(format, args...)}}
 	}
@@ -152,14 +174,17 @@ func (p Prover) passes(ctx context.Context, r Rule, variant string, n int) ([]by
 		args = append(args, "-tags", "broken")
 	}
 	out, err := p.goCmd(ctx, timeout, append(args, "./"+r.Dir)...)
+	if err := cannotRun(err); err != nil {
+		return out, nil, err
+	}
 	if err != nil {
-		return out, bad("%s variant does not pass %s:\n%s", variant, test, excerpt(out))
+		return out, bad("%s variant does not pass %s:\n%s", variant, test, excerpt(out)), nil
 	}
 	passRe := regexp.MustCompile(`(?m)^--- PASS: ` + regexp.QuoteMeta(test) + ` \(`)
 	if got := len(passRe.FindAll(out, -1)); got != n {
-		return out, bad("%s variant: %s passed %d times, want %d — does the test exist?", variant, test, got, n)
+		return out, bad("%s variant: %s passed %d times, want %d — does the test exist?", variant, test, got, n), nil
 	}
-	return out, nil
+	return out, nil, nil
 }
 
 type runResult struct {

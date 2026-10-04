@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -56,6 +57,20 @@ func TestExplainUnknownID(t *testing.T) {
 	_, err := Explain(context.Background(), Options{Root: "testdata/fixture"}, "R42", false, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "no rule with id R42") {
 		t.Fatalf("err = %v, want it to name the missing id", err)
+	}
+}
+
+// TestExplainCannotRun: a go command that cannot start explains nothing about
+// the rule — the reader gets the gate's failure, not a verdict.
+func TestExplainCannotRun(t *testing.T) {
+	opt := Options{Root: "testdata/fixture", Prover: Prover{Go: filepath.Join(t.TempDir(), "no-such-go")}}
+	for _, id := range []string{"R91", "R80", "R84"} { // test, vet, measure
+		t.Run(id, func(t *testing.T) {
+			ok, err := Explain(context.Background(), opt, id, false, &bytes.Buffer{})
+			if ok || !errors.Is(err, errCannotRun) {
+				t.Fatalf("ok = %v, err = %v; want errCannotRun", ok, err)
+			}
+		})
 	}
 }
 

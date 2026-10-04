@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -35,15 +37,15 @@ var (
 // nothing), the benchmarks run in both, and every measurement on record names
 // its regime and rests on at least MinSamples samples per side. The numbers
 // themselves are judged in review (G3) — CI runners are too noisy to gate on.
-func (p Prover) proveMeasure(ctx context.Context, r Rule) ([]Violation, string) {
+func (p Prover) proveMeasure(ctx context.Context, r Rule) ([]Violation, string, error) {
 	bad := func(format string, args ...any) []Violation {
 		return []Violation{{Rule: r.ID, Gate: "G1", Msg: fmt.Sprintf(format, args...)}}
 	}
-	if _, vs := p.passes(ctx, r, "fixed", r.Proof.Runs); vs != nil {
-		return vs, ""
+	if _, vs, err := p.passes(ctx, r, "fixed", r.Proof.Runs); vs != nil || err != nil {
+		return vs, "", err
 	}
-	if _, vs := p.passes(ctx, r, "broken", 1); vs != nil {
-		return vs, ""
+	if _, vs, err := p.passes(ctx, r, "broken", 1); vs != nil || err != nil {
+		return vs, "", err
 	}
 	for _, variant := range []string{"fixed", "broken"} {
 		args := []string{"test", "-run", "^$", "-bench", ".", "-benchtime", "1x"}
@@ -51,28 +53,38 @@ func (p Prover) proveMeasure(ctx context.Context, r Rule) ([]Violation, string) 
 			args = append(args, "-tags", "broken")
 		}
 		out, err := p.goCmd(ctx, p.timeout(), append(args, "./"+r.Dir)...)
+		if err := cannotRun(err); err != nil {
+			return nil, "", err
+		}
 		if err != nil {
-			return bad("%s variant: benchmarks fail:\n%s", variant, excerpt(out)), ""
+			return bad("%s variant: benchmarks fail:\n%s", variant, excerpt(out)), "", nil
 		}
 		if !benchLineRe.Match(out) {
-			return bad("%s variant: no benchmark ran — a measure rule needs a Benchmark function in both variants", variant), ""
+			return bad("%s variant: no benchmark ran — a measure rule needs a Benchmark function in both variants", variant), "", nil
 		}
 	}
-	files, problems := checkMeasurements(p.Root, r)
+	files, problems, err := checkMeasurements(p.Root, r)
+	if err != nil {
+		return nil, "", err
+	}
 	if len(problems) > 0 {
-		return bad("%s", strings.Join(problems, "; ")), ""
+		return bad("%s", strings.Join(problems, "; ")), "", nil
 	}
 	return nil, fmt.Sprintf("measure: fixed passed %d×, broken is correct, benchmarks run in both; %d measurement(s) on record",
-		r.Proof.Runs, files)
+		r.Proof.Runs, files), nil
 }
 
 // checkMeasurements validates every artifact in the rule's
-// testdata/measurements directory and returns how many there are.
-func checkMeasurements(root string, r Rule) (int, []string) {
+// testdata/measurements directory and returns how many there are. An artifact
+// it cannot read is the gate's failure (errCannotRun), not the rule's.
+func checkMeasurements(root string, r Rule) (int, []string, error) {
 	rel := path.Join(r.Dir, "testdata", "measurements")
 	entries, err := os.ReadDir(filepath.Join(root, filepath.FromSlash(rel)))
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, []string{fmt.Sprintf("no measurement artifact in %s: a measure rule ships the numbers its page quotes", rel)}, nil
+	}
 	if err != nil {
-		return 0, []string{fmt.Sprintf("no measurement artifact in %s: a measure rule ships the numbers its page quotes", rel)}
+		return 0, nil, fmt.Errorf("%w: %w", errCannotRun, err)
 	}
 	var problems []string
 	n := 0
@@ -83,8 +95,7 @@ func checkMeasurements(root string, r Rule) (int, []string) {
 		n++
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel), e.Name()))
 		if err != nil {
-			problems = append(problems, fmt.Sprintf("measurement %s: %v", e.Name(), err))
-			continue
+			return 0, nil, fmt.Errorf("%w: %w", errCannotRun, err)
 		}
 		for _, msg := range checkMeasurement(r.ID, r.Dir, data) {
 			problems = append(problems, fmt.Sprintf("measurement %s: %s", e.Name(), msg))
@@ -93,7 +104,7 @@ func checkMeasurements(root string, r Rule) (int, []string) {
 	if n == 0 && len(problems) == 0 {
 		problems = append(problems, fmt.Sprintf("no measurement artifact in %s: a measure rule ships the numbers its page quotes", rel))
 	}
-	return n, problems
+	return n, problems, nil
 }
 
 // checkMeasurement checks one artifact: a "# key: value" header naming the

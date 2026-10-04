@@ -81,11 +81,15 @@ func Check(ctx context.Context, opt Options) (Report, error) {
 			rep.Violations = append(rep.Violations, own...)
 			continue
 		}
-		pvs, summary := p.Prove(ctx, r)
+		pvs, summary, err := p.Prove(ctx, r)
 		if err := ctx.Err(); err != nil {
 			// Interrupted: the killed processes say nothing about the rule, and
 			// reporting them as failures would be a verdict nobody reached.
 			return Report{}, fmt.Errorf("interrupted while proving %s: %w", r.ID, err)
+		}
+		if err != nil {
+			// The gate could not run the proof: no verdict either way.
+			return Report{}, fmt.Errorf("proving %s: %w", r.ID, err)
 		}
 		own = append(own, pvs...)
 		if len(own) == 0 {
