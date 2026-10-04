@@ -26,6 +26,14 @@ func TestParsePage(t *testing.T) {
 			wantID:   "R07",
 			wantBody: "# Body\n",
 		},
+		{
+			// Some Windows editors save UTF-8 with a byte order mark. Zensical
+			// strips it and reads the front matter, so the gate must too.
+			name:     "byte order mark",
+			page:     string(rune(0xFEFF)) + "---\nid: R07\n---\n# Body\n",
+			wantID:   "R07",
+			wantBody: "# Body\n",
+		},
 		{name: "no front matter", page: "# Body\n", wantErr: "does not start with"},
 		{name: "unclosed", page: "---\nid: R07\n# Body\n", wantErr: "not closed"},
 		{name: "empty", page: "---\n\n---\n# Body\n", wantErr: "empty"},
