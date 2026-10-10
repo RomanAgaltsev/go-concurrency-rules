@@ -2,7 +2,7 @@
   // One click to a working checkout: Go 1.27 with a C compiler (so -race works),
   // Python for the site, and the tools the Taskfile calls at CI's versions.
   "name": "go-concurrency-rules",
-  "image": "mcr.microsoft.com/devcontainers/go:2.3.1-1.27-bookworm",
+  "image": "mcr.microsoft.com/devcontainers/go:2.3.3-1.27-bookworm",
   "features": {
     "ghcr.io/devcontainers/features/python:1": { "version": "3.14" }
   },
