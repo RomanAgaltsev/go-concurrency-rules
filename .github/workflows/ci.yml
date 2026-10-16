@@ -23,7 +23,7 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           # Must be built with Go >= the go directive, or it refuses the config.
-          version: v2.14.0
+          version: v2.15.0
       - name: Workflows are valid (actionlint)
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
 
